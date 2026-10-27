@@ -40,17 +40,23 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: pytorch-fugaku:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       # Smoke test before pushing: import, build facts, and the MPI backend on
       # the image's own Open MPI (on Fugaku the same binary uses Fujitsu MPI).
+      # Open MPI 4.0.1's mpirun needs an rsh agent on the path even for local
+      # ranks, and ignores OMPI_ALLOW_RUN_AS_ROOT; both are set here only, not in
+      # the image, since Fujitsu MPI also reads OMPI_MCA_* variables.
       - name: Smoke test
         run: |
           docker run --rm pytorch-fugaku:test python -c "import torch, torch.distributed as d; print(torch.__version__); print(torch.__config__.show()); assert d.is_mpi_available() and d.is_gloo_available()"
-          docker run --rm -e OMPI_ALLOW_RUN_AS_ROOT=1 -e OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 pytorch-fugaku:test \
-            mpirun --oversubscribe -np 2 python -c "import torch, torch.distributed as d; d.init_process_group('mpi'); t = torch.full((1 << 22,), float(d.get_rank())); d.all_reduce(t); assert t.eq(1).all(); print('mpi all_reduce ok, rank', d.get_rank())"
+          docker run --rm -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
+            mpirun --allow-run-as-root --oversubscribe -np 2 python -c "import torch, torch.distributed as d; d.init_process_group('mpi'); t = torch.full((1 << 22,), float(d.get_rank())); d.all_reduce(t); assert t.eq(1).all(); print('mpi all_reduce ok, rank', d.get_rank())"
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
           push: true
+          cache-from: type=gha
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
