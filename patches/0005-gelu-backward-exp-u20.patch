@@ -1,0 +1,25 @@
+diff --git a/aten/src/ATen/native/cpu/Activation.cpp b/aten/src/ATen/native/cpu/Activation.cpp
+index 4ea90e7..d89603b 100644
+--- a/aten/src/ATen/native/cpu/Activation.cpp
++++ b/aten/src/ATen/native/cpu/Activation.cpp
+@@ -482,8 +482,9 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+               auto [dy0, dy1] = convert_to_float<scalar_t>(dy);
+               auto cdf_vec0 = kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
+               auto cdf_vec1 = kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
+-              auto pdf_vec0 = kBetaVec * (x0 * x0 * kMinusPointFiveVec).exp();
+-              auto pdf_vec1 = kBetaVec * (x1 * x1 * kMinusPointFiveVec).exp();
++              // exp_u20: within 2 ULP, and the cheaper exp where a vector type has one.
++              auto pdf_vec0 = kBetaVec * (x0 * x0 * kMinusPointFiveVec).exp_u20();
++              auto pdf_vec1 = kBetaVec * (x1 * x1 * kMinusPointFiveVec).exp_u20();
+               auto res0 = dy0 * (cdf_vec0 + x0 * pdf_vec0);
+               auto res1 = dy1 * (cdf_vec1 + x1 * pdf_vec1);
+               return convert_from_float<scalar_t>(res0, res1);
+@@ -512,7 +513,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+               const Vec cdf_vec =
+                   kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
+               const Vec pdf_vec =
+-                  kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
++                  kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp_u20();
+               return dy_vec * (cdf_vec + x_vec * pdf_vec);
+             });
+       });

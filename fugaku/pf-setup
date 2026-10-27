@@ -1,0 +1,24 @@
+#!/bin/bash
+# Once per job, on a compute node, before mpiexec: copy the compute node's
+# interconnect libraries (Tofu, PMIx, xpmem, hwloc, libevent) and their
+# non-glibc dependencies into $PF_HOSTLIB, which pf-run binds into each
+# container. They are needed by Fujitsu MPI and exist only on compute nodes.
+set -euo pipefail
+HL=${PF_HOSTLIB:-$PWD/.pf-hostlib}
+mkdir -p "$HL"
+# libelf: for the Fujitsu runtime preloaded by PF_FJBLAS=1.
+todo="libxpmem.so.0 libtofucom.so libtofutop.so libpmix.so.2 libhwloc.so.15 libevent-2.1.so.6 libevent_pthreads-2.1.so.6 libfjstring_internal.so libelf.so.1"
+seen=" "
+while [[ -n "${todo// /}" ]]; do
+  set -- $todo; so=$1; shift; todo="$*"
+  [[ "$seen" == *" $so "* ]] && continue
+  seen="$seen$so "
+  case "$so" in libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libutil.so*|ld-linux*) continue ;; esac
+  # No early exit in these pipelines: under pipefail a SIGPIPE'd ldconfig ends the script.
+  path=$(/sbin/ldconfig -p | awk -v s="$so" '$1 == s && !p {p = $NF} END {print p}')
+  [[ -z "$path" ]] && path=$(find /usr/lib64 /lib64 /opt/FJSVxtclanga -name "$so" -print -quit 2>/dev/null || true)
+  [[ -z "$path" ]] && { echo "pf-setup: $so not found on this node" >&2; exit 1; }
+  cp -L "$path" "$HL/$so"
+  todo="$todo $(readelf -dW "$path" | awk -F'[][]' '/NEEDED/ {print $2}' | tr '\n' ' ')"
+done
+echo "pf-setup: $(ls "$HL" | wc -l) libraries in $HL"

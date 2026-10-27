@@ -1,0 +1,69 @@
+diff --git a/torch/csrc/distributed/c10d/ProcessGroupMPI.cpp b/torch/csrc/distributed/c10d/ProcessGroupMPI.cpp
+index f7a5f18..e3fb6dd 100644
+--- a/torch/csrc/distributed/c10d/ProcessGroupMPI.cpp
++++ b/torch/csrc/distributed/c10d/ProcessGroupMPI.cpp
+@@ -2,6 +2,9 @@
+ 
+ #ifdef USE_C10D_MPI
+ 
++#include <algorithm>
++#include <cstdlib>
++#include <cstring>
+ #include <iostream>
+ #include <map>
+ 
+@@ -59,6 +62,26 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
+ 
+ // Checking CUDA-aware MPI support, currently we only support CUDA aware
+ // MPI ops through Open MPI
++// Without large pages, Fujitsu MPI registers every new buffer it sends with
++// the interconnect, seconds per step at 48 ranks; staging CPU reductions
++// through one reused buffer registers it once. Opt in: TORCH_MPI_STAGE_BYTES.
++size_t mpiStageBytes() {
++  static const size_t bytes = [] {
++    const char* v = std::getenv("TORCH_MPI_STAGE_BYTES");
++    return v ? static_cast<size_t>(std::strtoull(v, nullptr, 10)) : size_t{0};
++  }();
++  return bytes;
++}
++
++// Called with pgGlobalMutex_ held, so one buffer serves the process.
++char* mpiStageBuffer(size_t bytes) {
++  static char* buf = [bytes] {
++    void* p = nullptr;
++    return posix_memalign(&p, size_t{1} << 21, bytes) == 0 ? static_cast<char*>(p) : nullptr;
++  }();
++  return buf;
++}
++
+ bool cudaAwareMpiCheck() {
+ // Run time check
+ #if defined(MPIX_CUDA_AWARE_SUPPORT)
+@@ -439,6 +462,27 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
+         auto data = (entry->src)[0];
+         c10::DeviceGuard guard(data.device());
+         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
++        const size_t stage = mpiStageBytes();
++        char* buf = stage ? mpiStageBuffer(stage) : nullptr;
++        if (buf && data.device().is_cpu() && data.is_contiguous() &&
++            static_cast<size_t>(data.element_size()) <= stage) {
++          const int64_t esize = data.element_size();
++          const int64_t chunk = static_cast<int64_t>(stage) / esize;
++          char* base = static_cast<char*>(data.data_ptr());
++          for (int64_t off = 0; off < data.numel(); off += chunk) {
++            const int64_t n = std::min(chunk, data.numel() - off);
++            std::memcpy(buf, base + off * esize, n * esize);
++            MPI_CHECK(MPI_Allreduce(
++                MPI_IN_PLACE,
++                buf,
++                n,
++                mpiDatatype.at(data.scalar_type()),
++                mpiOp.at(opts.reduceOp),
++                pgComm_));
++            std::memcpy(base + off * esize, buf, n * esize);
++          }
++          return;
++        }
+         MPI_CHECK(MPI_Allreduce(
+             MPI_IN_PLACE,
+             data.data_ptr(),

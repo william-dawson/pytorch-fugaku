@@ -1,0 +1,49 @@
+diff --git a/aten/src/ATen/native/LinearAlgebra.cpp b/aten/src/ATen/native/LinearAlgebra.cpp
+index 017b2d4..f268831 100644
+--- a/aten/src/ATen/native/LinearAlgebra.cpp
++++ b/aten/src/ATen/native/LinearAlgebra.cpp
+@@ -5,6 +5,7 @@
+ #include <ATen/NamedTensorUtils.h>
+ #include <ATen/OpMathType.h>
+ #include <ATen/Parallel.h>
++#include <ATen/core/LegacyTypeDispatch.h>
+ #include <ATen/TensorIndexing.h>
+ #include <ATen/TensorIterator.h>
+ #include <ATen/TensorOperators.h>
+@@ -1833,12 +1834,22 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
+     const bool enable_multithreaded_bmm = c10::InferenceMode::is_enabled() &&
+         bs >= 4 && res_rows >= 4 && res_cols >= 16 && contraction_size >= 16;
+ #else
+-    const bool enable_multithreaded_bmm{false};
++    // Without a batched GEMM (MKL) every slice is its own BLAS call, which
++    // threads poorly when slices are small: thread over the batch instead,
++    // unless slices are large and fewer than the threads.
++    const bool enable_multithreaded_bmm = !at::hasMKL() && bs > 1 &&
++        (2 * res_rows * res_cols * contraction_size < 16000000 ||
++         bs >= at::get_num_threads());
+ #endif
+     if (is_bmm_out) {
+       if (enable_multithreaded_bmm) {
+         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
++#ifdef C10_MOBILE
+           c10::InferenceMode guard;
++#else
++          // Workers do not inherit the caller's below-autograd dispatch state.
++          at::AutoDispatchBelowAutograd guard;
++#endif
+           for (const auto b : c10::irange(start, end)) {
+             auto r = self_or_result.select(0, b);
+             addmm_impl_cpu_(
+@@ -1857,7 +1868,12 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
+     } else {
+       if (enable_multithreaded_bmm) {
+         auto bmm_fn = [&](uint64_t start, uint64_t end) {
++#ifdef C10_MOBILE
+           c10::InferenceMode guard;
++#else
++          // Workers do not inherit the caller's below-autograd dispatch state.
++          at::AutoDispatchBelowAutograd guard;
++#endif
+           for (const auto b : c10::irange(start, end)) {
+             self_or_result.select(0, b).addmm_(
+                 batch1.select(0, b), batch2.select(0, b), beta, alpha);

@@ -1,0 +1,670 @@
+diff --git a/aten/src/ATen/cpu/vec/sve/aor_erff_data.h b/aten/src/ATen/cpu/vec/sve/aor_erff_data.h
+new file mode 100644
+index 0000000..aaad5bc
+--- /dev/null
++++ b/aten/src/ATen/cpu/vec/sve/aor_erff_data.h
+@@ -0,0 +1,530 @@
++#pragma once
++
++// erf(r) and 2/sqrt(pi)*exp(-r^2) at r = k/128, k = 0..512, from Arm Optimized
++// Routines math/aarch64/v_erff_data.c.
++// Copyright (c) 2023-2024, Arm Limited.
++// SPDX-License-Identifier: MIT OR Apache-2.0 WITH LLVM-exception
++
++namespace at::vec::sve_aor {
++
++struct ErffEntry {
++  float erf, scale;
++};
++
++// constexpr: constant-initialized data, so no SVE code runs at load time.
++inline constexpr ErffEntry erff_tab[513] = {
++    {0x0.000000p+0f, 0x1.20dd76p+0f},
++    {0x1.20dbf4p-7f, 0x1.20d8f2p+0f},
++    {0x1.20d770p-6f, 0x1.20cb68p+0f},
++    {0x1.b137e0p-6f, 0x1.20b4d8p+0f},
++    {0x1.20c564p-5f, 0x1.209546p+0f},
++    {0x1.68e5d4p-5f, 0x1.206cb4p+0f},
++    {0x1.b0fafep-5f, 0x1.203b26p+0f},
++    {0x1.f902a8p-5f, 0x1.2000a0p+0f},
++    {0x1.207d48p-4f, 0x1.1fbd28p+0f},
++    {0x1.44703ep-4f, 0x1.1f70c4p+0f},
++    {0x1.68591ap-4f, 0x1.1f1b7ap+0f},
++    {0x1.8c36bep-4f, 0x1.1ebd56p+0f},
++    {0x1.b00812p-4f, 0x1.1e565cp+0f},
++    {0x1.d3cbf8p-4f, 0x1.1de698p+0f},
++    {0x1.f7815ap-4f, 0x1.1d6e14p+0f},
++    {0x1.0d9390p-3f, 0x1.1cecdcp+0f},
++    {0x1.1f5e1ap-3f, 0x1.1c62fap+0f},
++    {0x1.311fc2p-3f, 0x1.1bd07cp+0f},
++    {0x1.42d7fcp-3f, 0x1.1b3572p+0f},
++    {0x1.548642p-3f, 0x1.1a91e6p+0f},
++    {0x1.662a0cp-3f, 0x1.19e5eap+0f},
++    {0x1.77c2d2p-3f, 0x1.19318cp+0f},
++    {0x1.895010p-3f, 0x1.1874dep+0f},
++    {0x1.9ad142p-3f, 0x1.17aff0p+0f},
++    {0x1.ac45e4p-3f, 0x1.16e2d8p+0f},
++    {0x1.bdad72p-3f, 0x1.160da4p+0f},
++    {0x1.cf076ep-3f, 0x1.153068p+0f},
++    {0x1.e05354p-3f, 0x1.144b3cp+0f},
++    {0x1.f190aap-3f, 0x1.135e30p+0f},
++    {0x1.015f78p-2f, 0x1.12695ep+0f},
++    {0x1.09eed6p-2f, 0x1.116cd8p+0f},
++    {0x1.127632p-2f, 0x1.1068bap+0f},
++    {0x1.1af54ep-2f, 0x1.0f5d16p+0f},
++    {0x1.236bf0p-2f, 0x1.0e4a08p+0f},
++    {0x1.2bd9dcp-2f, 0x1.0d2fa6p+0f},
++    {0x1.343ed6p-2f, 0x1.0c0e0ap+0f},
++    {0x1.3c9aa8p-2f, 0x1.0ae550p+0f},
++    {0x1.44ed18p-2f, 0x1.09b590p+0f},
++    {0x1.4d35f0p-2f, 0x1.087ee4p+0f},
++    {0x1.5574f4p-2f, 0x1.07416cp+0f},
++    {0x1.5da9f4p-2f, 0x1.05fd3ep+0f},
++    {0x1.65d4b8p-2f, 0x1.04b27cp+0f},
++    {0x1.6df50ap-2f, 0x1.036140p+0f},
++    {0x1.760abap-2f, 0x1.0209a6p+0f},
++    {0x1.7e1594p-2f, 0x1.00abd0p+0f},
++    {0x1.861566p-2f, 0x1.fe8fb0p-1f},
++    {0x1.8e0a02p-2f, 0x1.fbbbbep-1f},
++    {0x1.95f336p-2f, 0x1.f8dc0ap-1f},
++    {0x1.9dd0d2p-2f, 0x1.f5f0cep-1f},
++    {0x1.a5a2acp-2f, 0x1.f2fa4cp-1f},
++    {0x1.ad6896p-2f, 0x1.eff8c4p-1f},
++    {0x1.b52264p-2f, 0x1.ecec78p-1f},
++    {0x1.bccfecp-2f, 0x1.e9d5a8p-1f},
++    {0x1.c47104p-2f, 0x1.e6b498p-1f},
++    {0x1.cc0584p-2f, 0x1.e38988p-1f},
++    {0x1.d38d44p-2f, 0x1.e054bep-1f},
++    {0x1.db081cp-2f, 0x1.dd167cp-1f},
++    {0x1.e275eap-2f, 0x1.d9cf06p-1f},
++    {0x1.e9d68ap-2f, 0x1.d67ea2p-1f},
++    {0x1.f129d4p-2f, 0x1.d32592p-1f},
++    {0x1.f86faap-2f, 0x1.cfc41ep-1f},
++    {0x1.ffa7eap-2f, 0x1.cc5a8ap-1f},
++    {0x1.03693ap-1f, 0x1.c8e91cp-1f},
++    {0x1.06f794p-1f, 0x1.c5701ap-1f},
++    {0x1.0a7ef6p-1f, 0x1.c1efcap-1f},
++    {0x1.0dff50p-1f, 0x1.be6872p-1f},
++    {0x1.117894p-1f, 0x1.bada5ap-1f},
++    {0x1.14eab4p-1f, 0x1.b745c6p-1f},
++    {0x1.1855a6p-1f, 0x1.b3aafcp-1f},
++    {0x1.1bb95cp-1f, 0x1.b00a46p-1f},
++    {0x1.1f15ccp-1f, 0x1.ac63e8p-1f},
++    {0x1.226ae8p-1f, 0x1.a8b828p-1f},
++    {0x1.25b8a8p-1f, 0x1.a5074ep-1f},
++    {0x1.28ff02p-1f, 0x1.a1519ep-1f},
++    {0x1.2c3decp-1f, 0x1.9d9762p-1f},
++    {0x1.2f755cp-1f, 0x1.99d8dap-1f},
++    {0x1.32a54cp-1f, 0x1.961650p-1f},
++    {0x1.35cdb4p-1f, 0x1.925008p-1f},
++    {0x1.38ee8ap-1f, 0x1.8e8646p-1f},
++    {0x1.3c07cap-1f, 0x1.8ab950p-1f},
++    {0x1.3f196ep-1f, 0x1.86e96ap-1f},
++    {0x1.42236ep-1f, 0x1.8316d6p-1f},
++    {0x1.4525c8p-1f, 0x1.7f41dcp-1f},
++    {0x1.482074p-1f, 0x1.7b6abcp-1f},
++    {0x1.4b1372p-1f, 0x1.7791b8p-1f},
++    {0x1.4dfebap-1f, 0x1.73b714p-1f},
++    {0x1.50e24cp-1f, 0x1.6fdb12p-1f},
++    {0x1.53be26p-1f, 0x1.6bfdf0p-1f},
++    {0x1.569244p-1f, 0x1.681ff2p-1f},
++    {0x1.595ea6p-1f, 0x1.644156p-1f},
++    {0x1.5c2348p-1f, 0x1.60625cp-1f},
++    {0x1.5ee02ep-1f, 0x1.5c8342p-1f},
++    {0x1.619556p-1f, 0x1.58a446p-1f},
++    {0x1.6442c0p-1f, 0x1.54c5a6p-1f},
++    {0x1.66e86ep-1f, 0x1.50e79ep-1f},
++    {0x1.69865ep-1f, 0x1.4d0a68p-1f},
++    {0x1.6c1c98p-1f, 0x1.492e42p-1f},
++    {0x1.6eab18p-1f, 0x1.455366p-1f},
++    {0x1.7131e6p-1f, 0x1.417a0cp-1f},
++    {0x1.73b102p-1f, 0x1.3da26ep-1f},
++    {0x1.762870p-1f, 0x1.39ccc2p-1f},
++    {0x1.789836p-1f, 0x1.35f940p-1f},
++    {0x1.7b0058p-1f, 0x1.32281ep-1f},
++    {0x1.7d60d8p-1f, 0x1.2e5992p-1f},
++    {0x1.7fb9c0p-1f, 0x1.2a8dcep-1f},
++    {0x1.820b12p-1f, 0x1.26c508p-1f},
++    {0x1.8454d6p-1f, 0x1.22ff72p-1f},
++    {0x1.869712p-1f, 0x1.1f3d3cp-1f},
++    {0x1.88d1cep-1f, 0x1.1b7e98p-1f},
++    {0x1.8b050ep-1f, 0x1.17c3b6p-1f},
++    {0x1.8d30dep-1f, 0x1.140cc4p-1f},
++    {0x1.8f5544p-1f, 0x1.1059eep-1f},
++    {0x1.91724ap-1f, 0x1.0cab62p-1f},
++    {0x1.9387f6p-1f, 0x1.09014cp-1f},
++    {0x1.959652p-1f, 0x1.055bd6p-1f},
++    {0x1.979d68p-1f, 0x1.01bb2cp-1f},
++    {0x1.999d42p-1f, 0x1.fc3ee6p-2f},
++    {0x1.9b95e8p-1f, 0x1.f511aap-2f},
++    {0x1.9d8768p-1f, 0x1.edeeeep-2f},
++    {0x1.9f71cap-1f, 0x1.e6d700p-2f},
++    {0x1.a1551ap-1f, 0x1.dfca26p-2f},
++    {0x1.a33162p-1f, 0x1.d8c8aap-2f},
++    {0x1.a506b0p-1f, 0x1.d1d2d0p-2f},
++    {0x1.a6d50cp-1f, 0x1.cae8dap-2f},
++    {0x1.a89c86p-1f, 0x1.c40b08p-2f},
++    {0x1.aa5d26p-1f, 0x1.bd3998p-2f},
++    {0x1.ac16fcp-1f, 0x1.b674c8p-2f},
++    {0x1.adca14p-1f, 0x1.afbcd4p-2f},
++    {0x1.af767ap-1f, 0x1.a911f0p-2f},
++    {0x1.b11c3cp-1f, 0x1.a27456p-2f},
++    {0x1.b2bb68p-1f, 0x1.9be438p-2f},
++    {0x1.b4540ap-1f, 0x1.9561c8p-2f},
++    {0x1.b5e630p-1f, 0x1.8eed36p-2f},
++    {0x1.b771e8p-1f, 0x1.8886b2p-2f},
++    {0x1.b8f742p-1f, 0x1.822e66p-2f},
++    {0x1.ba764ap-1f, 0x1.7be47ap-2f},
++    {0x1.bbef10p-1f, 0x1.75a91ap-2f},
++    {0x1.bd61a2p-1f, 0x1.6f7c6ap-2f},
++    {0x1.bece0ep-1f, 0x1.695e8cp-2f},
++    {0x1.c03464p-1f, 0x1.634fa6p-2f},
++    {0x1.c194b2p-1f, 0x1.5d4fd4p-2f},
++    {0x1.c2ef08p-1f, 0x1.575f34p-2f},
++    {0x1.c44376p-1f, 0x1.517de6p-2f},
++    {0x1.c5920ap-1f, 0x1.4bac00p-2f},
++    {0x1.c6dad2p-1f, 0x1.45e99cp-2f},
++    {0x1.c81de2p-1f, 0x1.4036d0p-2f},
++    {0x1.c95b46p-1f, 0x1.3a93b2p-2f},
++    {0x1.ca930ep-1f, 0x1.350052p-2f},
++    {0x1.cbc54cp-1f, 0x1.2f7cc4p-2f},
++    {0x1.ccf20cp-1f, 0x1.2a0916p-2f},
++    {0x1.ce1962p-1f, 0x1.24a554p-2f},
++    {0x1.cf3b5cp-1f, 0x1.1f518ap-2f},
++    {0x1.d0580cp-1f, 0x1.1a0dc6p-2f},
++    {0x1.d16f7ep-1f, 0x1.14da0ap-2f},
++    {0x1.d281c4p-1f, 0x1.0fb662p-2f},
++    {0x1.d38ef0p-1f, 0x1.0aa2d0p-2f},
++    {0x1.d49710p-1f, 0x1.059f5ap-2f},
++    {0x1.d59a34p-1f, 0x1.00ac00p-2f},
++    {0x1.d6986cp-1f, 0x1.f79184p-3f},
++    {0x1.d791cap-1f, 0x1.edeb40p-3f},
++    {0x1.d8865ep-1f, 0x1.e46530p-3f},
++    {0x1.d97636p-1f, 0x1.daff4ap-3f},
++    {0x1.da6162p-1f, 0x1.d1b982p-3f},
++    {0x1.db47f4p-1f, 0x1.c893cep-3f},
++    {0x1.dc29fcp-1f, 0x1.bf8e1cp-3f},
++    {0x1.dd0788p-1f, 0x1.b6a856p-3f},
++    {0x1.dde0aap-1f, 0x1.ade26cp-3f},
++    {0x1.deb570p-1f, 0x1.a53c42p-3f},
++    {0x1.df85eap-1f, 0x1.9cb5bep-3f},
++    {0x1.e0522ap-1f, 0x1.944ec2p-3f},
++    {0x1.e11a3ep-1f, 0x1.8c0732p-3f},
++    {0x1.e1de36p-1f, 0x1.83deeap-3f},
++    {0x1.e29e22p-1f, 0x1.7bd5c8p-3f},
++    {0x1.e35a12p-1f, 0x1.73eba4p-3f},
++    {0x1.e41214p-1f, 0x1.6c2056p-3f},
++    {0x1.e4c638p-1f, 0x1.6473b6p-3f},
++    {0x1.e5768cp-1f, 0x1.5ce596p-3f},
++    {0x1.e62322p-1f, 0x1.5575c8p-3f},
++    {0x1.e6cc08p-1f, 0x1.4e241ep-3f},
++    {0x1.e7714ap-1f, 0x1.46f066p-3f},
++    {0x1.e812fcp-1f, 0x1.3fda6cp-3f},
++    {0x1.e8b12ap-1f, 0x1.38e1fap-3f},
++    {0x1.e94be4p-1f, 0x1.3206dcp-3f},
++    {0x1.e9e336p-1f, 0x1.2b48dap-3f},
++    {0x1.ea7730p-1f, 0x1.24a7b8p-3f},
++    {0x1.eb07e2p-1f, 0x1.1e233ep-3f},
++    {0x1.eb9558p-1f, 0x1.17bb2cp-3f},
++    {0x1.ec1fa2p-1f, 0x1.116f48p-3f},
++    {0x1.eca6ccp-1f, 0x1.0b3f52p-3f},
++    {0x1.ed2ae6p-1f, 0x1.052b0cp-3f},
++    {0x1.edabfcp-1f, 0x1.fe6460p-4f},
++    {0x1.ee2a1ep-1f, 0x1.f2a902p-4f},
++    {0x1.eea556p-1f, 0x1.e72372p-4f},
++    {0x1.ef1db4p-1f, 0x1.dbd32ap-4f},
++    {0x1.ef9344p-1f, 0x1.d0b7a0p-4f},
++    {0x1.f00614p-1f, 0x1.c5d04ap-4f},
++    {0x1.f07630p-1f, 0x1.bb1c98p-4f},
++    {0x1.f0e3a6p-1f, 0x1.b09bfcp-4f},
++    {0x1.f14e82p-1f, 0x1.a64de6p-4f},
++    {0x1.f1b6d0p-1f, 0x1.9c31c6p-4f},
++    {0x1.f21ca0p-1f, 0x1.92470ap-4f},
++    {0x1.f27ff8p-1f, 0x1.888d1ep-4f},
++    {0x1.f2e0eap-1f, 0x1.7f036cp-4f},
++    {0x1.f33f7ep-1f, 0x1.75a960p-4f},
++    {0x1.f39bc2p-1f, 0x1.6c7e64p-4f},
++    {0x1.f3f5c2p-1f, 0x1.6381e2p-4f},
++    {0x1.f44d88p-1f, 0x1.5ab342p-4f},
++    {0x1.f4a31ep-1f, 0x1.5211ecp-4f},
++    {0x1.f4f694p-1f, 0x1.499d48p-4f},
++    {0x1.f547f2p-1f, 0x1.4154bcp-4f},
++    {0x1.f59742p-1f, 0x1.3937b2p-4f},
++    {0x1.f5e490p-1f, 0x1.31458ep-4f},
++    {0x1.f62fe8p-1f, 0x1.297dbap-4f},
++    {0x1.f67952p-1f, 0x1.21df9ap-4f},
++    {0x1.f6c0dcp-1f, 0x1.1a6a96p-4f},
++    {0x1.f7068cp-1f, 0x1.131e14p-4f},
++    {0x1.f74a6ep-1f, 0x1.0bf97ep-4f},
++    {0x1.f78c8cp-1f, 0x1.04fc3ap-4f},
++    {0x1.f7cceep-1f, 0x1.fc4b5ep-5f},
++    {0x1.f80ba2p-1f, 0x1.eeea8cp-5f},
++    {0x1.f848acp-1f, 0x1.e1d4d0p-5f},
++    {0x1.f8841ap-1f, 0x1.d508fap-5f},
++    {0x1.f8bdf2p-1f, 0x1.c885e0p-5f},
++    {0x1.f8f63ep-1f, 0x1.bc4a54p-5f},
++    {0x1.f92d08p-1f, 0x1.b05530p-5f},
++    {0x1.f96256p-1f, 0x1.a4a54ap-5f},
++    {0x1.f99634p-1f, 0x1.99397ap-5f},
++    {0x1.f9c8a8p-1f, 0x1.8e109cp-5f},
++    {0x1.f9f9bap-1f, 0x1.83298ep-5f},
++    {0x1.fa2974p-1f, 0x1.78832cp-5f},
++    {0x1.fa57dep-1f, 0x1.6e1c58p-5f},
++    {0x1.fa84fep-1f, 0x1.63f3f6p-5f},
++    {0x1.fab0dep-1f, 0x1.5a08e8p-5f},
++    {0x1.fadb84p-1f, 0x1.505a18p-5f},
++    {0x1.fb04f6p-1f, 0x1.46e66cp-5f},
++    {0x1.fb2d40p-1f, 0x1.3dacd2p-5f},
++    {0x1.fb5464p-1f, 0x1.34ac36p-5f},
++    {0x1.fb7a6cp-1f, 0x1.2be38cp-5f},
++    {0x1.fb9f60p-1f, 0x1.2351c2p-5f},
++    {0x1.fbc344p-1f, 0x1.1af5d2p-5f},
++    {0x1.fbe61ep-1f, 0x1.12ceb4p-5f},
++    {0x1.fc07fap-1f, 0x1.0adb60p-5f},
++    {0x1.fc28d8p-1f, 0x1.031ad6p-5f},
++    {0x1.fc48c2p-1f, 0x1.f7182ap-6f},
++    {0x1.fc67bcp-1f, 0x1.e85c44p-6f},
++    {0x1.fc85d0p-1f, 0x1.da0006p-6f},
++    {0x1.fca2fep-1f, 0x1.cc0180p-6f},
++    {0x1.fcbf52p-1f, 0x1.be5ecep-6f},
++    {0x1.fcdaccp-1f, 0x1.b1160ap-6f},
++    {0x1.fcf576p-1f, 0x1.a4255ap-6f},
++    {0x1.fd0f54p-1f, 0x1.978ae8p-6f},
++    {0x1.fd286ap-1f, 0x1.8b44e6p-6f},
++    {0x1.fd40bep-1f, 0x1.7f5188p-6f},
++    {0x1.fd5856p-1f, 0x1.73af0cp-6f},
++    {0x1.fd6f34p-1f, 0x1.685bb6p-6f},
++    {0x1.fd8562p-1f, 0x1.5d55ccp-6f},
++    {0x1.fd9ae2p-1f, 0x1.529b9ep-6f},
++    {0x1.fdafb8p-1f, 0x1.482b84p-6f},
++    {0x1.fdc3e8p-1f, 0x1.3e03d8p-6f},
++    {0x1.fdd77ap-1f, 0x1.3422fep-6f},
++    {0x1.fdea6ep-1f, 0x1.2a875cp-6f},
++    {0x1.fdfcccp-1f, 0x1.212f62p-6f},
++    {0x1.fe0e96p-1f, 0x1.181984p-6f},
++    {0x1.fe1fd0p-1f, 0x1.0f443ep-6f},
++    {0x1.fe3080p-1f, 0x1.06ae14p-6f},
++    {0x1.fe40a6p-1f, 0x1.fcab14p-7f},
++    {0x1.fe504cp-1f, 0x1.ec7262p-7f},
++    {0x1.fe5f70p-1f, 0x1.dcaf36p-7f},
++    {0x1.fe6e18p-1f, 0x1.cd5ecap-7f},
++    {0x1.fe7c46p-1f, 0x1.be7e5ap-7f},
++    {0x1.fe8a00p-1f, 0x1.b00b38p-7f},
++    {0x1.fe9748p-1f, 0x1.a202bep-7f},
++    {0x1.fea422p-1f, 0x1.94624ep-7f},
++    {0x1.feb090p-1f, 0x1.87275ep-7f},
++    {0x1.febc96p-1f, 0x1.7a4f6ap-7f},
++    {0x1.fec836p-1f, 0x1.6dd7fep-7f},
++    {0x1.fed374p-1f, 0x1.61beaep-7f},
++    {0x1.fede52p-1f, 0x1.56011cp-7f},
++    {0x1.fee8d4p-1f, 0x1.4a9cf6p-7f},
++    {0x1.fef2fep-1f, 0x1.3f8ff6p-7f},
++    {0x1.fefccep-1f, 0x1.34d7dcp-7f},
++    {0x1.ff064cp-1f, 0x1.2a727ap-7f},
++    {0x1.ff0f76p-1f, 0x1.205dacp-7f},
++    {0x1.ff1852p-1f, 0x1.169756p-7f},
++    {0x1.ff20e0p-1f, 0x1.0d1d6ap-7f},
++    {0x1.ff2924p-1f, 0x1.03ede2p-7f},
++    {0x1.ff3120p-1f, 0x1.f60d8ap-8f},
++    {0x1.ff38d6p-1f, 0x1.e4cc4ap-8f},
++    {0x1.ff4048p-1f, 0x1.d4143ap-8f},
++    {0x1.ff4778p-1f, 0x1.c3e1a6p-8f},
++    {0x1.ff4e68p-1f, 0x1.b430ecp-8f},
++    {0x1.ff551ap-1f, 0x1.a4fe84p-8f},
++    {0x1.ff5b90p-1f, 0x1.9646f4p-8f},
++    {0x1.ff61ccp-1f, 0x1.8806d8p-8f},
++    {0x1.ff67d0p-1f, 0x1.7a3adep-8f},
++    {0x1.ff6d9ep-1f, 0x1.6cdfccp-8f},
++    {0x1.ff7338p-1f, 0x1.5ff276p-8f},
++    {0x1.ff789ep-1f, 0x1.536fc2p-8f},
++    {0x1.ff7dd4p-1f, 0x1.4754acp-8f},
++    {0x1.ff82dap-1f, 0x1.3b9e40p-8f},
++    {0x1.ff87b2p-1f, 0x1.30499cp-8f},
++    {0x1.ff8c5cp-1f, 0x1.2553eep-8f},
++    {0x1.ff90dcp-1f, 0x1.1aba78p-8f},
++    {0x1.ff9532p-1f, 0x1.107a8cp-8f},
++    {0x1.ff9960p-1f, 0x1.06918cp-8f},
++    {0x1.ff9d68p-1f, 0x1.f9f9d0p-9f},
++    {0x1.ffa14ap-1f, 0x1.e77448p-9f},
++    {0x1.ffa506p-1f, 0x1.d58da6p-9f},
++    {0x1.ffa8a0p-1f, 0x1.c4412cp-9f},
++    {0x1.ffac18p-1f, 0x1.b38a3ap-9f},
++    {0x1.ffaf6ep-1f, 0x1.a36454p-9f},
++    {0x1.ffb2a6p-1f, 0x1.93cb12p-9f},
++    {0x1.ffb5bep-1f, 0x1.84ba30p-9f},
++    {0x1.ffb8b8p-1f, 0x1.762d84p-9f},
++    {0x1.ffbb98p-1f, 0x1.682100p-9f},
++    {0x1.ffbe5ap-1f, 0x1.5a90b0p-9f},
++    {0x1.ffc102p-1f, 0x1.4d78bcp-9f},
++    {0x1.ffc390p-1f, 0x1.40d564p-9f},
++    {0x1.ffc606p-1f, 0x1.34a306p-9f},
++    {0x1.ffc862p-1f, 0x1.28de12p-9f},
++    {0x1.ffcaa8p-1f, 0x1.1d8318p-9f},
++    {0x1.ffccd8p-1f, 0x1.128ebap-9f},
++    {0x1.ffcef4p-1f, 0x1.07fdb4p-9f},
++    {0x1.ffd0fap-1f, 0x1.fb99b8p-10f},
++    {0x1.ffd2eap-1f, 0x1.e7f232p-10f},
++    {0x1.ffd4cap-1f, 0x1.d4fed8p-10f},
++    {0x1.ffd696p-1f, 0x1.c2b9d0p-10f},
++    {0x1.ffd84ep-1f, 0x1.b11d70p-10f},
++    {0x1.ffd9f8p-1f, 0x1.a02436p-10f},
++    {0x1.ffdb90p-1f, 0x1.8fc8c8p-10f},
++    {0x1.ffdd18p-1f, 0x1.8005f0p-10f},
++    {0x1.ffde90p-1f, 0x1.70d6a4p-10f},
++    {0x1.ffdffap-1f, 0x1.6235fcp-10f},
++    {0x1.ffe154p-1f, 0x1.541f34p-10f},
++    {0x1.ffe2a2p-1f, 0x1.468daep-10f},
++    {0x1.ffe3e2p-1f, 0x1.397ceep-10f},
++    {0x1.ffe514p-1f, 0x1.2ce898p-10f},
++    {0x1.ffe63cp-1f, 0x1.20cc76p-10f},
++    {0x1.ffe756p-1f, 0x1.15246ep-10f},
++    {0x1.ffe866p-1f, 0x1.09ec86p-10f},
++    {0x1.ffe96ap-1f, 0x1.fe41cep-11f},
++    {0x1.ffea64p-1f, 0x1.e97ba4p-11f},
++    {0x1.ffeb54p-1f, 0x1.d57f52p-11f},
++    {0x1.ffec3ap-1f, 0x1.c245d4p-11f},
++    {0x1.ffed16p-1f, 0x1.afc85ep-11f},
++    {0x1.ffedeap-1f, 0x1.9e0058p-11f},
++    {0x1.ffeeb4p-1f, 0x1.8ce75ep-11f},
++    {0x1.ffef76p-1f, 0x1.7c7744p-11f},
++    {0x1.fff032p-1f, 0x1.6caa0ep-11f},
++    {0x1.fff0e4p-1f, 0x1.5d79ecp-11f},
++    {0x1.fff18ep-1f, 0x1.4ee142p-11f},
++    {0x1.fff232p-1f, 0x1.40daa4p-11f},
++    {0x1.fff2d0p-1f, 0x1.3360ccp-11f},
++    {0x1.fff366p-1f, 0x1.266ea8p-11f},
++    {0x1.fff3f6p-1f, 0x1.19ff46p-11f},
++    {0x1.fff480p-1f, 0x1.0e0de8p-11f},
++    {0x1.fff504p-1f, 0x1.0295f0p-11f},
++    {0x1.fff582p-1f, 0x1.ef25d4p-12f},
++    {0x1.fff5fcp-1f, 0x1.da0110p-12f},
++    {0x1.fff670p-1f, 0x1.c5b542p-12f},
++    {0x1.fff6dep-1f, 0x1.b23a5ap-12f},
++    {0x1.fff74ap-1f, 0x1.9f8894p-12f},
++    {0x1.fff7aep-1f, 0x1.8d986ap-12f},
++    {0x1.fff810p-1f, 0x1.7c629ap-12f},
++    {0x1.fff86cp-1f, 0x1.6be022p-12f},
++    {0x1.fff8c6p-1f, 0x1.5c0a38p-12f},
++    {0x1.fff91cp-1f, 0x1.4cda54p-12f},
++    {0x1.fff96cp-1f, 0x1.3e4a24p-12f},
++    {0x1.fff9bap-1f, 0x1.305390p-12f},
++    {0x1.fffa04p-1f, 0x1.22f0b4p-12f},
++    {0x1.fffa4cp-1f, 0x1.161be4p-12f},
++    {0x1.fffa90p-1f, 0x1.09cfa4p-12f},
++    {0x1.fffad0p-1f, 0x1.fc0d56p-13f},
++    {0x1.fffb0ep-1f, 0x1.e577bcp-13f},
++    {0x1.fffb4ap-1f, 0x1.cfd4a6p-13f},
++    {0x1.fffb82p-1f, 0x1.bb1a96p-13f},
++    {0x1.fffbb8p-1f, 0x1.a74068p-13f},
++    {0x1.fffbecp-1f, 0x1.943d4ap-13f},
++    {0x1.fffc1ep-1f, 0x1.8208bcp-13f},
++    {0x1.fffc4ep-1f, 0x1.709a8ep-13f},
++    {0x1.fffc7ap-1f, 0x1.5feadap-13f},
++    {0x1.fffca6p-1f, 0x1.4ff208p-13f},
++    {0x1.fffccep-1f, 0x1.40a8c2p-13f},
++    {0x1.fffcf6p-1f, 0x1.3207fcp-13f},
++    {0x1.fffd1ap-1f, 0x1.2408eap-13f},
++    {0x1.fffd3ep-1f, 0x1.16a502p-13f},
++    {0x1.fffd60p-1f, 0x1.09d5f8p-13f},
++    {0x1.fffd80p-1f, 0x1.fb2b7ap-14f},
++    {0x1.fffda0p-1f, 0x1.e3bcf4p-14f},
++    {0x1.fffdbep-1f, 0x1.cd5528p-14f},
++    {0x1.fffddap-1f, 0x1.b7e946p-14f},
++    {0x1.fffdf4p-1f, 0x1.a36eecp-14f},
++    {0x1.fffe0ep-1f, 0x1.8fdc1cp-14f},
++    {0x1.fffe26p-1f, 0x1.7d2738p-14f},
++    {0x1.fffe3ep-1f, 0x1.6b4702p-14f},
++    {0x1.fffe54p-1f, 0x1.5a329cp-14f},
++    {0x1.fffe68p-1f, 0x1.49e178p-14f},
++    {0x1.fffe7ep-1f, 0x1.3a4b60p-14f},
++    {0x1.fffe90p-1f, 0x1.2b6876p-14f},
++    {0x1.fffea2p-1f, 0x1.1d3120p-14f},
++    {0x1.fffeb4p-1f, 0x1.0f9e1cp-14f},
++    {0x1.fffec4p-1f, 0x1.02a868p-14f},
++    {0x1.fffed4p-1f, 0x1.ec929ap-15f},
++    {0x1.fffee4p-1f, 0x1.d4f4b4p-15f},
++    {0x1.fffef2p-1f, 0x1.be6abcp-15f},
++    {0x1.ffff00p-1f, 0x1.a8e8ccp-15f},
++    {0x1.ffff0cp-1f, 0x1.94637ep-15f},
++    {0x1.ffff18p-1f, 0x1.80cfdcp-15f},
++    {0x1.ffff24p-1f, 0x1.6e2368p-15f},
++    {0x1.ffff30p-1f, 0x1.5c540cp-15f},
++    {0x1.ffff3ap-1f, 0x1.4b581cp-15f},
++    {0x1.ffff44p-1f, 0x1.3b2652p-15f},
++    {0x1.ffff4ep-1f, 0x1.2bb5ccp-15f},
++    {0x1.ffff56p-1f, 0x1.1cfe02p-15f},
++    {0x1.ffff60p-1f, 0x1.0ef6c4p-15f},
++    {0x1.ffff68p-1f, 0x1.019842p-15f},
++    {0x1.ffff70p-1f, 0x1.e9b5e8p-16f},
++    {0x1.ffff78p-1f, 0x1.d16f58p-16f},
++    {0x1.ffff7ep-1f, 0x1.ba4f04p-16f},
++    {0x1.ffff84p-1f, 0x1.a447b8p-16f},
++    {0x1.ffff8cp-1f, 0x1.8f4cccp-16f},
++    {0x1.ffff92p-1f, 0x1.7b5224p-16f},
++    {0x1.ffff98p-1f, 0x1.684c22p-16f},
++    {0x1.ffff9cp-1f, 0x1.562facp-16f},
++    {0x1.ffffa2p-1f, 0x1.44f21ep-16f},
++    {0x1.ffffa6p-1f, 0x1.34894ap-16f},
++    {0x1.ffffacp-1f, 0x1.24eb72p-16f},
++    {0x1.ffffb0p-1f, 0x1.160f44p-16f},
++    {0x1.ffffb4p-1f, 0x1.07ebd2p-16f},
++    {0x1.ffffb8p-1f, 0x1.f4f12ep-17f},
++    {0x1.ffffbcp-1f, 0x1.db5ad0p-17f},
++    {0x1.ffffc0p-1f, 0x1.c304f0p-17f},
++    {0x1.ffffc4p-1f, 0x1.abe09ep-17f},
++    {0x1.ffffc6p-1f, 0x1.95df98p-17f},
++    {0x1.ffffcap-1f, 0x1.80f43ap-17f},
++    {0x1.ffffccp-1f, 0x1.6d1178p-17f},
++    {0x1.ffffd0p-1f, 0x1.5a2ae0p-17f},
++    {0x1.ffffd2p-1f, 0x1.483488p-17f},
++    {0x1.ffffd4p-1f, 0x1.372310p-17f},
++    {0x1.ffffd6p-1f, 0x1.26eb9ep-17f},
++    {0x1.ffffd8p-1f, 0x1.1783cep-17f},
++    {0x1.ffffdcp-1f, 0x1.08e1bap-17f},
++    {0x1.ffffdep-1f, 0x1.f5f7d8p-18f},
++    {0x1.ffffdep-1f, 0x1.db92b6p-18f},
++    {0x1.ffffe0p-1f, 0x1.c282cep-18f},
++    {0x1.ffffe2p-1f, 0x1.aab7acp-18f},
++    {0x1.ffffe4p-1f, 0x1.94219cp-18f},
++    {0x1.ffffe6p-1f, 0x1.7eb1a2p-18f},
++    {0x1.ffffe8p-1f, 0x1.6a5972p-18f},
++    {0x1.ffffe8p-1f, 0x1.570b6ap-18f},
++    {0x1.ffffeap-1f, 0x1.44ba86p-18f},
++    {0x1.ffffeap-1f, 0x1.335a62p-18f},
++    {0x1.ffffecp-1f, 0x1.22df2ap-18f},
++    {0x1.ffffeep-1f, 0x1.133d96p-18f},
++    {0x1.ffffeep-1f, 0x1.046aeap-18f},
++    {0x1.fffff0p-1f, 0x1.ecb9d0p-19f},
++    {0x1.fffff0p-1f, 0x1.d21398p-19f},
++    {0x1.fffff2p-1f, 0x1.b8d094p-19f},
++    {0x1.fffff2p-1f, 0x1.a0df10p-19f},
++    {0x1.fffff2p-1f, 0x1.8a2e26p-19f},
++    {0x1.fffff4p-1f, 0x1.74adc8p-19f},
++    {0x1.fffff4p-1f, 0x1.604ea8p-19f},
++    {0x1.fffff4p-1f, 0x1.4d0232p-19f},
++    {0x1.fffff6p-1f, 0x1.3aba86p-19f},
++    {0x1.fffff6p-1f, 0x1.296a70p-19f},
++    {0x1.fffff6p-1f, 0x1.190562p-19f},
++    {0x1.fffff8p-1f, 0x1.097f62p-19f},
++    {0x1.fffff8p-1f, 0x1.f59a20p-20f},
++    {0x1.fffff8p-1f, 0x1.d9c736p-20f},
++    {0x1.fffff8p-1f, 0x1.bf716cp-20f},
++    {0x1.fffffap-1f, 0x1.a6852cp-20f},
++    {0x1.fffffap-1f, 0x1.8eefd8p-20f},
++    {0x1.fffffap-1f, 0x1.789fb8p-20f},
++    {0x1.fffffap-1f, 0x1.6383f8p-20f},
++    {0x1.fffffap-1f, 0x1.4f8c96p-20f},
++    {0x1.fffffap-1f, 0x1.3caa62p-20f},
++    {0x1.fffffcp-1f, 0x1.2acee2p-20f},
++    {0x1.fffffcp-1f, 0x1.19ec60p-20f},
++    {0x1.fffffcp-1f, 0x1.09f5d0p-20f},
++    {0x1.fffffcp-1f, 0x1.f5bd96p-21f},
++    {0x1.fffffcp-1f, 0x1.d9371ep-21f},
++    {0x1.fffffcp-1f, 0x1.be41dep-21f},
++    {0x1.fffffcp-1f, 0x1.a4c89ep-21f},
++    {0x1.fffffcp-1f, 0x1.8cb738p-21f},
++    {0x1.fffffep-1f, 0x1.75fa8ep-21f},
++    {0x1.fffffep-1f, 0x1.608078p-21f},
++    {0x1.fffffep-1f, 0x1.4c37c0p-21f},
++    {0x1.fffffep-1f, 0x1.39100ep-21f},
++    {0x1.fffffep-1f, 0x1.26f9e0p-21f},
++    {0x1.fffffep-1f, 0x1.15e682p-21f},
++    {0x1.fffffep-1f, 0x1.05c804p-21f},
++    {0x1.fffffep-1f, 0x1.ed2254p-22f},
++    {0x1.fffffep-1f, 0x1.d06ad6p-22f},
++    {0x1.fffffep-1f, 0x1.b551c8p-22f},
++    {0x1.fffffep-1f, 0x1.9bc0a0p-22f},
++    {0x1.fffffep-1f, 0x1.83a200p-22f},
++    {0x1.fffffep-1f, 0x1.6ce1aap-22f},
++    {0x1.fffffep-1f, 0x1.576c72p-22f},
++    {0x1.fffffep-1f, 0x1.43302cp-22f},
++    {0x1.fffffep-1f, 0x1.301ba2p-22f},
++    {0x1.fffffep-1f, 0x1.1e1e86p-22f},
++    {0x1.fffffep-1f, 0x1.0d2966p-22f},
++    {0x1.000000p+0f, 0x1.fa5b50p-23f},
++    {0x1.000000p+0f, 0x1.dc3ae4p-23f},
++    {0x1.000000p+0f, 0x1.bfd756p-23f},
++    {0x1.000000p+0f, 0x1.a517dap-23f},
++    {0x1.000000p+0f, 0x1.8be4f8p-23f},
++    {0x1.000000p+0f, 0x1.74287ep-23f},
++    {0x1.000000p+0f, 0x1.5dcd66p-23f},
++    {0x1.000000p+0f, 0x1.48bfd4p-23f},
++    {0x1.000000p+0f, 0x1.34ecf8p-23f},
++    {0x1.000000p+0f, 0x1.224310p-23f},
++    {0x1.000000p+0f, 0x1.10b148p-23f}};
++
++} // namespace at::vec::sve_aor
+diff --git a/aten/src/ATen/cpu/vec/sve/vec_float.h b/aten/src/ATen/cpu/vec/sve/vec_float.h
+index 379aa95..1675948 100644
+--- a/aten/src/ATen/cpu/vec/sve/vec_float.h
++++ b/aten/src/ATen/cpu/vec/sve/vec_float.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <ATen/cpu/vec/intrinsics.h>
++#include <ATen/cpu/vec/sve/aor_erff_data.h>
+ #include <ATen/cpu/vec/sve/sve_helper.h>
+ #include <ATen/cpu/vec/vec_base.h>
+ #include <cmath>
+@@ -229,9 +230,31 @@ class Vectorized<float> {
+           return loadu(tmp);
+         });
+   }
++  // Arm Optimized Routines erff (math/aarch64/sve/erff.c; MIT OR Apache-2.0
++  // WITH LLVM-exception), max 1.93 ULP: a table and a short polynomial.
+   Vectorized<float> erf() const {
+-    return USE_SLEEF(
+-        Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf));
++    const svbool_t pg = svptrue_b32();
++    const float shift = 0x1p16f;
++    svbool_t a_gt_min = svacgt(pg, values, 0x1.cp-7f);
++    svbool_t a_ge_max = svacge(pg, values, 3.9375f);
++    // Clamped so the table index stays in range; those lanes become +-1 below.
++    svfloat32_t a = svmin_x(pg, svabs_x(pg, values), 3.9375f);
++    svfloat32_t z = svadd_x(pg, a, shift);
++    svuint32_t i = svand_x(pg, svreinterpret_u32(z), 0xfffu);
++    i = svadd_x(pg, i, i);
++    svfloat32_t r = svsub_z(a_gt_min, z, shift);
++    svfloat32_t erfr =
++        svld1_gather_index(a_gt_min, &sve_aor::erff_tab[0].erf, i);
++    svfloat32_t scale =
++        svld1_gather_index(a_gt_min, &sve_aor::erff_tab[0].scale, i);
++    scale = svsel(a_gt_min, scale, svdup_f32(0x1.20dd76p+0f));
++    svfloat32_t d = svsub_x(pg, a, r);
++    svfloat32_t d2 = svmul_x(pg, d, d);
++    svfloat32_t y = svmla_x(pg, r, d, 0x1.555556p-2f);
++    y = svmla_x(pg, erfr, scale, svmls_x(pg, d, d2, y));
++    y = svsel(a_ge_max, svdup_f32(1.0f), y);
++    svuint32_t sign = svand_x(pg, svreinterpret_u32(values), 0x80000000u);
++    return svreinterpret_f32(svorr_x(pg, sign, svreinterpret_u32(y)));
+   }
+   Vectorized<float> erfc() const {
+     return USE_SLEEF(
+@@ -408,48 +431,32 @@ class Vectorized<float> {
+     return USE_SLEEF(
+         Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan));
+   }
+-  // Implementation is picked from
+-  // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
++  // Arm Optimized Routines tanhf (math/aarch64/sve/tanhf.c; MIT OR Apache-2.0
++  // WITH LLVM-exception), max 2.07 ULP: e^2x - 1 is computed directly, so
++  // small |x| does not cancel. |x| > ~9.01 rounds to +-1.
+   Vectorized<float> tanh() const {
+-    // Constants used for the tanh calculation.
+-    const svfloat32_t CONST_1 =
+-        svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
+-    const svfloat32_t CONST_2 = svdup_n_f32(
+-        2.f); // Constant 2.0f for the tanh formula (used in exp(2x)).
+-    const svfloat32_t CONST_MIN_TANH = svdup_n_f32(
+-        -10.f); // Minimum threshold for input values to prevent overflow.
+-    const svfloat32_t CONST_MAX_TANH = svdup_n_f32(
+-        10.f); // Maximum threshold for input values to prevent overflow.
+-
+-    // Step 1: Clamp the values within the range [-10, 10] to prevent overflow
+-    // during exponentiation. The tanh function approaches ±1 rapidly as the
+-    // input grows large, so we limit the input range to avoid numerical
+-    // instability. svmax_f32_z ensures values are greater than -10, and
+-    // svmin_f32_z ensures they are less than 10.
+-    svfloat32_t x = svmin_f32_z(
+-        ptrue, svmax_f32_z(ptrue, values, CONST_MIN_TANH), CONST_MAX_TANH);
+-
+-    // Step 2: Calculate exp(2 * x), where x is the clamped value.
+-    // svmul_f32_z computes 2 * x, and exp_u20() computes the exponential of
+-    // the result (via Vectorized<float>, then auto-converts back to
+-    // svfloat32_t).
+-    svfloat32_t exp2x =
+-        Vectorized<float>(svmul_f32_z(ptrue, CONST_2, x)).exp_u20();
+-
+-    // Step 3: Calculate the numerator of the tanh function, which is exp(2x)
+-    // - 1.
+-    svfloat32_t num = svsub_f32_z(ptrue, exp2x, CONST_1);
+-
+-    // Step 4: Calculate the denominator of the tanh function, which is exp(2x)
+-    // + 1.
+-    svfloat32_t den = svadd_f32_z(ptrue, exp2x, CONST_1);
+-
+-    // Step 5: Calculate the tanh function as the ratio of the numerator and
+-    // denominator: num / den.
+-    svfloat32_t tanh = svdiv_f32_z(ptrue, num, den);
+-
+-    // Return the calculated tanh values.
+-    return tanh;
++    const svbool_t pg = svptrue_b32();
++    svfloat32_t x = values;
++    svfloat32_t j = svrinta_x(pg, svmul_x(pg, x, 0x1.715476p+1f));
++    svfloat32_t f = svadd_x(pg, x, x);
++    f = svmls_x(pg, f, j, 0x1.62e4p-1f);
++    f = svmls_x(pg, f, j, 0x1.7f7d1cp-20f);
++    svfloat32_t p12 =
++        svmla_x(pg, svdup_f32(0x1.5554aep-3f), f, svdup_f32(0x1.555736p-5f));
++    svfloat32_t p34 =
++        svmla_x(pg, svdup_f32(0x1.12287cp-7f), f, svdup_f32(0x1.6b55a2p-10f));
++    svfloat32_t f2 = svmul_x(pg, f, f);
++    svfloat32_t p = svmla_x(pg, p12, f2, p34);
++    p = svmla_x(pg, svdup_f32(0x1.fffffep-2f), f, p);
++    p = svmla_x(pg, f, f2, p);
++    svfloat32_t t = svscale_x(pg, svdup_f32(1.0f), svcvt_s32_x(pg, j));
++    svfloat32_t q = svmla_x(pg, svsub_x(pg, t, 1.0f), p, t); // e^2x - 1
++    svfloat32_t y = svdiv_x(pg, q, svadd_x(pg, q, 2.0f));
++    svbool_t big = svacgt(pg, x, 0x1.205966p+3f);
++    svuint32_t sign = svand_x(pg, svreinterpret_u32(x), 0x80000000u);
++    svfloat32_t one =
++        svreinterpret_f32(svorr_x(pg, sign, svdup_u32(0x3f800000u)));
++    return svsel(big, one, y);
+   }
+   Vectorized<float> trunc() const {
+     return svrintz_f32_x(ptrue, values);
+diff --git a/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp b/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp
+index 24ab7e9..314a9b4 100644
+--- a/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp
++++ b/aten/src/ATen/native/cpu/BinaryOpsKernel.cpp
+@@ -1012,7 +1012,8 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
+             return a * (scalar_t{1} - b * b);
+           },
+           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+-            return a * (one_vec - b * b);
++            // Fused: 1 - b*b cancels for |b| near 1 if b*b is rounded first.
++            return a * fnmadd(b, b, one_vec);
+           });
+     });
+   }
