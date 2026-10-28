@@ -1,25 +1,30 @@
 #!/bin/bash
 # One rank: run a command in the pytorch-fugaku image with Fujitsu MPI bound in.
 #   mpiexec -n <ranks> pf-run pytorch-fugaku.sif python train.py
-# RANK comes from Fujitsu mpiexec (PMIX_RANK); the MPI backend
-# (torch.distributed.init_process_group("mpi")) needs nothing else.
+# Each rank gets RANK and LOCAL_RANK from Fujitsu mpiexec (PMIX_RANK) and
+# WORLD_SIZE, MASTER_ADDR, MASTER_PORT, GLOO_SOCKET_IFNAME from pf-setup, so
+# init_process_group("gloo") works unchanged; DDP's gradients then go over
+# Fujitsu MPI (torch_fugaku).
 # PF_BIND adds binds (comma-separated, Singularity syntax).
 # PF_FJBLAS=1 runs the process on Fujitsu's OpenMP runtime so Fujitsu's
 # threaded BLAS can be loaded beside torch (README, "Fujitsu's linear algebra").
 set -euo pipefail
 SIF=${1:?usage: pf-run <image.sif> <command...>}; shift
 HL=${PF_HOSTLIB:-$PWD/.pf-hostlib}
-[[ -d "$HL" ]] || { echo "pf-run: run pf-setup first ($HL missing)" >&2; exit 1; }
+[[ -f "$HL/pf.env" ]] || { echo "pf-run: run pf-setup first ($HL/pf.env missing)" >&2; exit 1; }
 FJ=/opt/FJSVxtclanga/tcsds-latest/lib64
 B=/opt/FJSVxtclanga,/var/opt/FJSVtcs,/run,/usr/lib/FJSVtcs,/etc/opt/FJSVtcs
 # Singularity's own /sys remount loses the CPU topology torch and MPI read.
 B=$B,/sys/devices/system/cpu,/sys/fs/cgroup,$HL:/opt/pytorch-fugaku/hostlib
 [[ -n "${PF_BIND:-}" ]] && B=$B,$PF_BIND
-ENV=(--env RANK="${PMIX_RANK:-0}")
+ENV=()
+while IFS='=' read -r k v; do [[ -n "$k" ]] && ENV+=(--env "$k=$v"); done < "$HL/pf.env"
+R=${PMIX_RANK:-0}
+ENV+=(--env RANK=$R --env LOCAL_RANK=$((R % $(grep -oP '(?<=PF_RANKS_PER_NODE=)[0-9]+' "$HL/pf.env"))))
 if [[ "${PF_FJBLAS:-0}" == 1 ]]; then
   # libfjomphk serves libgomp's interface on Fujitsu's runtime; the set below is
   # Fujitsu's documented threaded link line, preloaded whole.
   ENV+=(--env LD_PRELOAD=$FJ/libfjomphk.so:$FJ/libfjomp.so:$FJ/libfj90i.so.1:$FJ/libfj90f.so.1:$FJ/libfjsrcinfo.so:$FJ/libfjcrt.so.1:$FJ/libfjompcrt.so:/opt/pytorch-fugaku/hostlib/libelf.so.1)
-  ENV+=(--env LD_LIBRARY_PATH=/opt/pytorch-fugaku/fjomp:/opt/pytorch-fugaku/fujitsu-mpi:/opt/pytorch-fugaku/hostlib:$FJ:/opt/nvpl/lib:/opt/openmpi/lib)
+  ENV+=(--env LD_LIBRARY_PATH=/opt/pytorch-fugaku/fjomp:/opt/pytorch-fugaku/fujitsu-mpi:/opt/pytorch-fugaku/hostlib:$FJ:/opt/openmpi/lib)
 fi
 exec singularity exec -B "$B" "${ENV[@]}" "$SIF" "$@"

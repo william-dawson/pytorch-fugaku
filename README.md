@@ -1,10 +1,22 @@
 # pytorch-fugaku
 
-PyTorch for [Fugaku](https://www.r-ccs.riken.jp/en/fugaku/) (Fujitsu A64FX), as a
-container image: PyTorch 2.11.0 built from source with a few A64FX patches, the
-MPI backend working on Fujitsu MPI, and the settings A64FX needs baked in. The
-image is built by GitHub Actions and contains nothing from Fujitsu; on Fugaku,
-two small scripts bind Fujitsu MPI in at run time.
+PyTorch for [Fugaku](https://www.r-ccs.riken.jp/en/fugaku/) (Fujitsu A64FX) as a
+container image: the official PyTorch aarch64 wheel plus **torch_fugaku**, a
+small package that adds what A64FX needs through public PyTorch interfaces:
+
+- **CPU kernels** (`TORCH_LIBRARY_IMPL`): `bmm` threaded over the batch (the
+  wheel multiplies one slice at a time without MKL; 9-15x on small slices) and
+  SVE `gelu`, `gelu_backward`, `tanh` from Arm Optimized Routines (the wheel's
+  run near scalar speed on A64FX; 3-11x). Loaded only on CPUs with SVE.
+- **Gradients over Fujitsu MPI**: a DDP communication hook
+  (`register_comm_hook`) that sums gradient buckets with `MPI_Allreduce` over
+  Tofu instead of gloo over TCP (2x at 4 nodes, 2.1x at 12). The process group
+  stays gloo; only the gradient transport changes.
+- **Settings**: oneDNN off (its ARM Compute Library path is ~3x slower in
+  backward on A64FX), `OMP_WAIT_POLICY=ACTIVE`.
+
+The image is built and tested by GitHub Actions and contains nothing from
+Fujitsu. On Fugaku, two small scripts bind Fujitsu MPI in at run time.
 
 ```
 ghcr.io/william-dawson/pytorch-fugaku:latest     # linux/arm64
@@ -19,85 +31,81 @@ singularity pull --arch arm64 pytorch-fugaku.sif docker://ghcr.io/william-dawson
 git clone https://github.com/william-dawson/pytorch-fugaku.git   # for fugaku/pf-setup, fugaku/pf-run
 ```
 
-In a job script, one rank per CMG (4 per node, 12 threads each):
+A job, one rank per CMG (4 per node, 12 threads each):
 
 ```sh
 #PJM -L node=4
+#PJM -L freq=2000,eco_state=0          # normal mode; see below
 #PJM --mpi max-proc-per-node=4
 export OMP_NUM_THREADS=12
-pytorch-fugaku/fugaku/pf-setup                     # once per job: the node's Tofu/PMIx libraries
+pytorch-fugaku/fugaku/pf-setup                     # once per job
 mpiexec -n 16 pytorch-fugaku/fugaku/pf-run pytorch-fugaku.sif python train.py
 ```
 
-In `train.py`, `torch.distributed.init_process_group("mpi")` starts PyTorch's MPI
-backend on Fujitsu MPI; it takes rank and size from MPI, so no `MASTER_ADDR` is
-needed. gloo is also built in.
+`train.py` needs nothing Fugaku-specific: `init_process_group("gloo")` and
+`DistributedDataParallel` as usual. `pf-setup` provides `WORLD_SIZE`,
+`MASTER_ADDR` (the first node's Tofu address), `MASTER_PORT` and
+`GLOO_SOCKET_IFNAME`; `pf-run` adds `RANK` and `LOCAL_RANK` from Fujitsu
+`mpiexec`. With `TORCH_FUGAKU=1` (the image default) torch_fugaku applies
+itself when torch is imported, including the MPI hook on every DDP model when
+the ranks were started by mpiexec.
 
 Things to know:
 
-- **DataLoader workers**: use `num_workers=0` with the MPI backend. Fujitsu MPI's
-  registered memory is not fork-safe, and workers forked after `MPI_Init` crash.
-- **Memory**: 32 GiB HBM2 per node, 8 GiB per rank at 4 ranks.
-- **`OMP_WAIT_POLICY=ACTIVE`** is set in the image: with libgomp's default
-  sleeping workers, A64FX loses ~5.5 ms per parallel region (a streaming kernel
-  drops from ~610 to ~200 GB/s).
-- **`TORCH_MPI_STAGE_BYTES=8388608`** is set in the image (patch 0004): without
-  Fujitsu's large pages, Fujitsu MPI registers every new buffer it sends, which
-  costs seconds per step at 48 ranks. Unset it to reduce in place.
-- **`PF_BIND`** adds bind mounts (your data, your code), comma-separated.
+- **Normal mode.** Fugaku jobs default to boost-eco (2.2 GHz, one FP pipeline
+  per core in use). Normal mode (`-L freq=2000,eco_state=0`) makes well-shaped
+  GEMMs ~1.4x faster; end to end it measured +9% (below).
+- **DataLoader workers**: use `num_workers=0`. Fujitsu MPI's registered memory
+  is not fork-safe; workers forked after `MPI_Init` crash.
+- **Memory**: 32 GiB HBM2 per node, 8 GiB per CMG-sized rank.
+- **`PF_BIND`** adds bind mounts (data, code), comma-separated.
 
-## What is in the image
+## The Python interface
 
-PyTorch v2.11.0 built with gcc 12 on Debian 12 (Python 3.10), NVPL BLAS/LAPACK
-as in PyTorch's own aarch64 wheels, gloo, and the MPI backend compiled against
-Open MPI 4.0.1, which is what Fujitsu MPI is based on. The image includes that
-Open MPI, so it also runs off Fugaku (any arm64 machine, for testing); on Fugaku
-`libmpi.so.40` resolves to Fujitsu's `libmpi.so.0` instead. Not built:
-CUDA, oneDNN (its ARM Compute Library path is ~3x slower in backward on
-A64FX), fbgemm and KleidiAI (quantized inference; gcc 12.2 cannot compile
-KleidiAI).
+Everything the autoload does is available explicitly (set `TORCH_FUGAKU=0` to
+turn the autoload off):
 
-The patches (`patches/`, applied in order to v2.11.0):
+```python
+import torch, torch_fugaku
+torch_fugaku.enable()              # kernels and settings
+model = torch_fugaku.ddp(model)    # DistributedDataParallel with gradients over MPI
+torch_fugaku.status()              # {'kernels': ['parbmm', 'fastmath'], 'mpi_world': 16, 'sve': True}
+```
 
-| patch | what | why |
-|---|---|---|
-| `0001-sve512-capability` | a 512-bit SVE CPU capability beside PyTorch's `SVE256` | PyTorch's SVE kernels exist only for 256-bit vectors with BF16 (Graviton 3); A64FX is 512-bit without BF16 and otherwise runs the NEON kernels. Selected only when the CPU reports 512-bit vectors; falls back to `DEFAULT`, never to 256-bit kernels. Generated by `tools/make_sve512_patch.py`. |
-| `0002-bmm-batch-parallel-without-mkl` | CPU `bmm` threads over the batch when there is no MKL | without a batched GEMM, `bmm` runs one BLAS call per slice; on many small slices that is 9-15x slower |
-| `0003-sve-aor-erf-tanh-fused-tanh-backward` | Arm Optimized Routines' `erff`/`tanhf` in the SVE float vector; fused `1 - y*y` in `tanh_backward` | PyTorch's SVE `tanh` (ARM Compute Library's formula) is 58 ULP; SLEEF's `erf` is latency-bound on A64FX; the unfused `tanh_backward` loses bits near +-1 |
-| `0004-mpi-staged-cpu-allreduce` | opt-in staging buffer for CPU `allreduce` in the MPI backend (`TORCH_MPI_STAGE_BYTES`) | Fujitsu MPI buffer registration without large pages |
-| `0005-gelu-backward-exp-u20` | `gelu_backward` uses `exp_u20` | the cheaper `exp` where a vector type has one |
+Or keep your own DDP and register the hook: `model.register_comm_hook(None,
+torch_fugaku.mpi_comm_hook)`. Environment switches for the autoload:
+`TORCH_FUGAKU_KERNELS=0`, `TORCH_FUGAKU_ONEDNN=1`, `TORCH_FUGAKU_MPI=0|1|auto`
+(auto: on when an MPI launcher started the process and `WORLD_SIZE > 1`).
 
 ## Measured on Fugaku (2026-10-28)
 
-Kernels, one CMG (12 threads), 16 M float32 elements (`tools/check_kernels.py`):
+Kernels, one CMG (12 threads), 16 M float32 elements:
 
-| op | stock aarch64 wheel | this image's kernels |
+| op | stock wheel | torch_fugaku |
 |---|---:|---:|
-| `gelu` | 17.1 ms, 180 ULP | 6.6 ms, 89 ULP |
-| `gelu_backward` | 29.7 ms, 380 ULP | 7.2 ms, 108 ULP (before 0005) |
+| `gelu` | 17.1 ms, 180 ULP | 5.3 ms, 89 ULP |
+| `gelu_backward` | 29.7 ms, 380 ULP | 3.9 ms, 121 ULP |
 | `tanh` | 43.5 ms, 1.0 ULP | 4.0 ms, 2.5 ULP |
-| `tanh_backward` | 1.46 ms, 1.4 ULP | 1.45 ms, 1.5 ULP |
-| `bmm`, 4096 slices of 32x32x32 | 111 ms | 6.6 ms, bit-identical |
+| `bmm`, 4096 slices of 32x32x32 | 111 ms | 7.2 ms, bit-identical |
 
 End to end, the [OmniLearned](https://github.com/ViniciusMikuni/OmniLearned) pretraining
-step (PET v2 medium, FP32, batch 8 per rank, one epoch of 25 iterations, losses
-identical to the stock wheel's), events/s, same nodes back to back:
+step (PET v2 medium, FP32, batch 8 per rank, losses identical to the stock
+wheel's), events/s:
 
-| | 1 node | 12 nodes |
-|---|---:|---:|
-| stock wheel + run-time kernel overrides + a DDP MPI hook (the hand-tuned reference) | 14.5 | 140.5 |
-| this image's kernels + the same DDP hook | 11.1 | 126.8 |
-| this image, PyTorch's MPI backend with staging | 10.0 | 88.3 |
+| | 1 node | 4 nodes | 12 nodes |
+|---|---:|---:|---:|
+| stock wheel, gloo | 0.49 | - | - |
+| torch_fugaku, boost-eco | 14.4 | 51.4 | 139.4 |
+| torch_fugaku, normal mode | 16.0 | | |
 
-This image is not yet as fast as the hand-tuned reference: the remaining gap is
-in the training loop rather than in single kernels (one rank's step runs as fast
-as the reference's), and in the MPI backend's overlap with compute. That is the
-next round of work.
+(1 node: one epoch of 25 iterations; the 4- and 12-node rows are the BenchKit
+two-epoch measurement. These were measured with the same kernels and hook
+built outside this image; the image itself is being validated.)
 
 ## Fujitsu's linear algebra (optional)
 
-The image uses NVPL for BLAS. Fujitsu's threaded BLAS (`libfjlapackexsve`) can
-be faster for large, square GEMMs. Measured, 48 threads, SGEMM in GFLOP/s:
+The wheel uses NVPL for BLAS. Fujitsu's threaded BLAS (`libfjlapackexsve`)
+beats it on some shapes, 48 threads, SGEMM GFLOP/s:
 
 | shape | NVPL | Fujitsu |
 |---|---:|---:|
@@ -105,29 +113,39 @@ be faster for large, square GEMMs. Measured, 48 threads, SGEMM in GFLOP/s:
 | 4096^3 | 2,360 | 2,982 |
 | 16384^3 | 2,461 | 3,008 |
 
-So whether it pays depends on your shapes. Fujitsu's threaded BLAS needs the
-whole process on Fujitsu's OpenMP runtime: beside libgomp it livelocks or runs
-at one core's speed. `PF_FJBLAS=1` arranges that: torch's `libgomp.so.1`
-becomes Fujitsu's `libfjomphk.so` (libgomp's interface on Fujitsu's runtime),
-and Fujitsu's documented threaded runtime set is preloaded. torch's own kernels
-run at the same speed there. Then load Fujitsu's BLAS yourself, for example a
-small C wrapper linked with Fujitsu's documented line
-(`-lfjlapackexsve -lfjomphk -lfjomp -lfj90i -lfj90f -lfjsrcinfo -lfjcrt -lfjompcrt -lelf`,
-built on Fugaku with the host gcc) and called through `ctypes` for the GEMMs that
-benefit. Fujitsu documents this use with other compilers as experimental and
-unsupported.
+and at 12 threads (one CMG) on most of OmniLearned's shapes. Whether it pays
+depends on your shapes. Fujitsu's threaded BLAS needs the whole process on
+Fujitsu's OpenMP runtime: beside libgomp it livelocks or runs at one core's
+speed. `PF_FJBLAS=1` arranges that (torch's `libgomp.so.1` interface served by
+Fujitsu's `libfjomphk.so`, Fujitsu's documented threaded runtime preloaded);
+then load Fujitsu's BLAS yourself, e.g. a small C wrapper linked with
+Fujitsu's documented line (`-lfjlapackexsve -lfjomphk -lfjomp -lfj90i -lfj90f
+-lfjsrcinfo -lfjcrt -lfjompcrt -lelf`, built on Fugaku with the host gcc) and
+called through `ctypes`. Validated with a source-built torch; Fujitsu
+documents this use with other compilers as experimental and unsupported.
 
-## Building it yourself
+## Updating PyTorch
 
-`Dockerfile` builds natively on any arm64 Linux machine with Docker or Podman
-(about 30-40 GB of disk; under an hour on 72 Grace cores, several on GitHub's
-4-core runner). `MAX_JOBS` limits parallel compile jobs. The CI workflow
-(`.github/workflows/image.yml`) builds on GitHub's arm64 runner, smoke-tests
-the MPI backend, and pushes to GHCR.
+Bump `TORCH_VERSION` in the `Dockerfile`. CI rebuilds torch_fugaku against the
+new wheel and runs `tests/` (kernel accuracy against FP64, `bmm` and its
+gradients, a 2-rank DDP step over MPI) on GitHub's arm64 runner, whose CPU has
+SVE, before pushing.
+
+## Source build (experimental)
+
+`source-build/` builds PyTorch 2.11.0 from source with A64FX patches: a
+512-bit SVE CPU capability, batch-parallel `bmm` and Arm Optimized Routines
+`erf`/`tanh` inside ATen, and a staged allreduce in the MPI backend, with
+Open MPI 4.0.1's ABI so it runs on Fujitsu MPI. It is built only on demand
+(`source-build` workflow, tag `:source`). It is correct but currently slower
+than this image for OmniLearned (11.2 vs 16.0 events/s on one node): the
+SVE512 kernels for ops these patches do not cover are slower than the
+wheel's NEON ones. Kept for that work and for upstreaming.
 
 ## Licenses
 
-The patches modify PyTorch (BSD-3-Clause). `0003` includes Arm Optimized
-Routines code and data (MIT OR Apache-2.0 WITH LLVM-exception). NVPL is
-NVIDIA's, under its redistributable license. Fujitsu's software is not
+torch_fugaku and the scripts: BSD-3-Clause. `torch_fugaku/csrc/fastmath.cpp`
+and `aor_erff_table.h` contain Arm Optimized Routines code and data (MIT OR
+Apache-2.0 WITH LLVM-exception). PyTorch and NVPL are installed from their
+published wheels under their own licenses. Fujitsu's software is not
 redistributed: it is bound from the Fugaku installation at run time.

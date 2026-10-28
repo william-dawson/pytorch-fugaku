@@ -1,0 +1,59 @@
+name: source-build
+
+# Experimental: PyTorch built from source with the A64FX patches
+# (source-build/). Manual only; about 75 minutes on the 4-core arm64 runner.
+# Pushes ghcr.io/<owner>/pytorch-fugaku:source-<sha> and :source, never latest.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/pytorch-fugaku
+          tags: |
+            type=sha,format=long,prefix=source-
+            type=raw,value=source
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: source-build/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: pytorch-fugaku:test
+          cache-from: type=gha,scope=source
+          cache-to: type=gha,scope=source,mode=max
+      # Smoke test before pushing: import, build facts, and the MPI backend on
+      # the image's own Open MPI (on Fugaku the same binary uses Fujitsu MPI).
+      # Open MPI 4.0.1's mpirun needs an rsh agent on the path even for local
+      # ranks, and ignores OMPI_ALLOW_RUN_AS_ROOT; both are set here only, not in
+      # the image, since Fujitsu MPI also reads OMPI_MCA_* variables.
+      - name: Smoke test
+        run: |
+          docker run --rm pytorch-fugaku:test python -c "import torch, torch.distributed as d; print(torch.__version__); print(torch.__config__.show()); assert d.is_mpi_available() and d.is_gloo_available()"
+          docker run --rm -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
+            mpirun --allow-run-as-root --oversubscribe -np 2 python -c "import torch, torch.distributed as d; d.init_process_group('mpi'); t = torch.full((1 << 22,), float(d.get_rank())); d.all_reduce(t); assert t.eq(1).all(); print('mpi all_reduce ok, rank', d.get_rank())"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: source-build/Dockerfile
+          platforms: linux/arm64
+          push: true
+          cache-from: type=gha,scope=source
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -1,10 +1,16 @@
 #!/bin/bash
-# Once per job, on a compute node, before mpiexec: copy the compute node's
-# interconnect libraries (Tofu, PMIx, xpmem, hwloc, libevent) and their
-# non-glibc dependencies into $PF_HOSTLIB, which pf-run binds into each
-# container. They are needed by Fujitsu MPI and exist only on compute nodes.
+# Once per job, on the job's first node, before mpiexec:
+#   pf-setup [ranks per node]          (default 4: one per CMG)
+# 1. Copies the compute node's interconnect libraries (Tofu, PMIx, xpmem,
+#    hwloc, libevent) and their non-glibc dependencies into $PF_HOSTLIB, which
+#    pf-run binds into each container. Fujitsu MPI needs them; they exist only
+#    on compute nodes.
+# 2. Writes $PF_HOSTLIB/pf.env with what a torch.distributed process group
+#    needs (Fujitsu mpiexec exports only PMIX_RANK): WORLD_SIZE, the ranks per
+#    node, and this node's Tofu address as MASTER_ADDR for gloo.
 set -euo pipefail
 HL=${PF_HOSTLIB:-$PWD/.pf-hostlib}
+RPN=${1:-4}
 mkdir -p "$HL"
 # libelf: for the Fujitsu runtime preloaded by PF_FJBLAS=1.
 todo="libxpmem.so.0 libtofucom.so libtofutop.so libpmix.so.2 libhwloc.so.15 libevent-2.1.so.6 libevent_pthreads-2.1.so.6 libfjstring_internal.so libelf.so.1"
@@ -21,4 +27,17 @@ while [[ -n "${todo// /}" ]]; do
   cp -L "$path" "$HL/$so"
   todo="$todo $(readelf -dW "$path" | awk -F'[][]' '/NEEDED/ {print $2}' | tr '\n' ' ')"
 done
-echo "pf-setup: $(ls "$HL" | wc -l) libraries in $HL"
+NODES=${PJM_NODE:-1}
+if (( NODES > 1 )); then
+  IFN=tofu1; ADDR=$(ip -o -4 addr show dev tofu1 | awk '{split($4, a, "/"); print a[1]; exit}')
+else
+  IFN=lo; ADDR=127.0.0.1
+fi
+cat > "$HL/pf.env" <<EOF
+WORLD_SIZE=$((NODES * RPN))
+PF_RANKS_PER_NODE=$RPN
+MASTER_ADDR=$ADDR
+MASTER_PORT=${MASTER_PORT:-29500}
+GLOO_SOCKET_IFNAME=$IFN
+EOF
+echo "pf-setup: $(ls "$HL" | grep -c '\.so') libraries in $HL; $(tr '\n' ' ' < "$HL/pf.env")"

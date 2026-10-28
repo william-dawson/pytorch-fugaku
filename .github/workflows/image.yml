@@ -1,13 +1,13 @@
 name: image
 
-# Builds the arm64 image natively on GitHub's arm64 runner and pushes it to
-# ghcr.io/<owner>/pytorch-fugaku. Tags: the commit SHA, plus "latest" on main
-# and the tag name on v* tags.
+# Builds the arm64 image (official PyTorch wheel + torch_fugaku) natively on
+# GitHub's arm64 runner, tests it, and pushes it to ghcr.io/<owner>/pytorch-fugaku.
+# Tags: the commit SHA, plus "latest" on main and the tag name on v* tags.
 on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**.md"]
+    paths-ignore: ["**.md", "source-build/**", ".github/workflows/source-build.yml"]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 360
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -42,16 +42,19 @@ jobs:
           tags: pytorch-fugaku:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Smoke test before pushing: import, build facts, and the MPI backend on
-      # the image's own Open MPI (on Fugaku the same binary uses Fujitsu MPI).
-      # Open MPI 4.0.1's mpirun needs an rsh agent on the path even for local
-      # ranks, and ignores OMPI_ALLOW_RUN_AS_ROOT; both are set here only, not in
-      # the image, since Fujitsu MPI also reads OMPI_MCA_* variables.
-      - name: Smoke test
+      # Tests before pushing. The runner's CPU has SVE (128-bit), so the SVE
+      # kernels are exercised. Open MPI 4.0.1's mpirun needs an rsh agent on
+      # the path even for local ranks, and ignores OMPI_ALLOW_RUN_AS_ROOT; both
+      # are set here only, not in the image, since Fujitsu MPI also reads
+      # OMPI_MCA_* variables.
+      - name: Import and autoload
+        run: docker run --rm pytorch-fugaku:test python -c "import torch, torch_fugaku; s = torch_fugaku.status(); print(torch.__version__, s); assert 'parbmm' in s['kernels'] and not torch.backends.mkldnn.enabled"
+      - name: Kernels
+        run: docker run --rm -e TORCH_FUGAKU=0 pytorch-fugaku:test python /opt/pytorch-fugaku/tests/test_kernels.py
+      - name: DDP gradients over MPI, 2 ranks
         run: |
-          docker run --rm pytorch-fugaku:test python -c "import torch, torch.distributed as d; print(torch.__version__); print(torch.__config__.show()); assert d.is_mpi_available() and d.is_gloo_available()"
-          docker run --rm -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
-            mpirun --allow-run-as-root --oversubscribe -np 2 python -c "import torch, torch.distributed as d; d.init_process_group('mpi'); t = torch.full((1 << 22,), float(d.get_rank())); d.all_reduce(t); assert t.eq(1).all(); print('mpi all_reduce ok, rank', d.get_rank())"
+          docker run --rm -e TORCH_FUGAKU=0 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
+            mpirun --allow-run-as-root --oversubscribe -np 2 python /opt/pytorch-fugaku/tests/test_ddp_mpi.py
       - uses: docker/build-push-action@v6
         with:
           context: .
