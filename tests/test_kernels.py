@@ -67,6 +67,10 @@ if st["sve"]:
         e = ulp_err(fast[k], r)
         check(e <= bounds[k], f"{k}: {e:.2f} ULP (bound {bounds[k]}, stock {ulp_err(stock[k], r):.2f})")
         diff = (torch.isfinite(fast[k]) != torch.isfinite(stock[k])) | (torch.isnan(fast[k]) != torch.isnan(stock[k]))
+        if k == "gelu_backward":
+            # At x = +-inf the formula is inf * 0: stock gives NaN on A64FX and
+            # +-inf on Neoverse, so the result there is implementation-defined.
+            diff &= ~torch.isinf(x)
         check(not bool(diff.any()), f"{k}: inf/NaN as stock")
         for i in diff.nonzero().flatten()[:8].tolist():
             print(f"        x={x[i].item():.6g} g={g[i].item():.6g}: torch_fugaku {fast[k][i].item():.6g}, "
