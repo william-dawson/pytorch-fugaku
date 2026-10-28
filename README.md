@@ -121,13 +121,13 @@ Kernels on one CMG, 16 M float32 elements:
 
 ## Fujitsu's linear algebra (optional)
 
-The image uses NVPL BLAS. Fujitsu's threaded BLAS is faster for some shapes
-(large square GEMMs, and many GEMMs at 12 threads), so whether it pays depends
-on your problem. It needs the whole process on Fujitsu's OpenMP runtime, which
-`PF_FJBLAS=1` sets up. Then load Fujitsu's BLAS from a small C wrapper linked
-with Fujitsu's documented line (`-lfjlapackexsve -lfjomphk -lfjomp -lfj90i
--lfj90f -lfjsrcinfo -lfjcrt -lfjompcrt -lelf`, built on Fugaku with the host
-gcc) and call it through `ctypes`.
+`PF_FJBLAS=1` runs each rank on Fujitsu's OpenMP runtime, with thread binding off (it would put
+every thread on one core), and torch_fugaku then sends float32 GEMMs to Fujitsu's threaded BLAS
+(`libfjlapackexsve`, loaded from the bound Fujitsu installation at run time; nothing of
+Fujitsu's is in the image). On one CMG it runs Llama-sized GEMMs at 1,000-1,200 GF/s against
+NVPL's 600-1,000. It pays with one rank per CMG (4 ranks x 12 threads per node): Llama-1B under
+DeepSpeed ZeRO-3 at 16 nodes went from 49.7 to 41.4 s per step. With fewer, wider ranks the
+threads spread across CMGs and it does not.
 
 ## Build and update
 

@@ -6,8 +6,8 @@
 # init_process_group("gloo") works unchanged; DDP's gradients then go over
 # Fujitsu MPI (torch_fugaku).
 # PF_BIND adds binds (comma-separated, Singularity syntax).
-# PF_FJBLAS=1 runs the process on Fujitsu's OpenMP runtime so Fujitsu's
-# threaded BLAS can be loaded beside torch (README, "Fujitsu's linear algebra").
+# PF_FJBLAS=1 runs the process on Fujitsu's OpenMP runtime and routes torch's float32 GEMMs to
+# Fujitsu's threaded BLAS (README, "Fujitsu's linear algebra").
 set -euo pipefail
 SIF=${1:?usage: pf-run <image.sif> <command...>}; shift
 HL=${PF_HOSTLIB:-$PWD/.pf-hostlib}
@@ -26,5 +26,8 @@ if [[ "${PF_FJBLAS:-0}" == 1 ]]; then
   # Fujitsu's documented threaded link line, preloaded whole.
   ENV+=(--env LD_PRELOAD=$FJ/libfjomphk.so:$FJ/libfjomp.so:$FJ/libfj90i.so.1:$FJ/libfj90f.so.1:$FJ/libfjsrcinfo.so:$FJ/libfjcrt.so.1:$FJ/libfjompcrt.so:/opt/pytorch-fugaku/hostlib/libelf.so.1)
   ENV+=(--env LD_LIBRARY_PATH=/opt/pytorch-fugaku/fjomp:/opt/pytorch-fugaku/fujitsu-mpi:/opt/pytorch-fugaku/hostlib:$FJ:/opt/openmpi/lib)
+  # Fujitsu's OpenMP binds the whole process to one core of the rank's CMG unless binding is
+  # off; with it off the threads spread over the CMG. torch_fugaku then routes GEMMs to it.
+  ENV+=(--env OMP_PROC_BIND=false --env TORCH_FUGAKU_FJBLAS=1)
 fi
 exec singularity exec -B "$B" "${ENV[@]}" "$SIF" "$@"

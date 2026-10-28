@@ -165,4 +165,5 @@ def _hook_every_ddp():
 def status():
     """What is active in this process."""
     return {"kernels": list(_state["kernels"]), "mpi_world": _state["world"], "sve": has_sve(),
-            "backend": "fjmpi" if _state["backend"] else None}
+            "backend": "fjmpi" if _state["backend"] else None,
+            "fjblas": os.environ.get("TORCH_FUGAKU_FJBLAS") == "1"}
