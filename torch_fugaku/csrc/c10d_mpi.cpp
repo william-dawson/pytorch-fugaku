@@ -3,8 +3,9 @@
 // runs on Fujitsu MPI on Fugaku. Collectives are synchronous: each call returns a
 // completed Work.
 //
-// Data moves through two reused 8 MB staging buffers: without Fujitsu's large pages, Tofu
-// registers every new buffer it sends, and torch's allocator keeps presenting new ones.
+// Data moves through two reused staging buffers (TORCH_FUGAKU_STAGE_MB each, default 8):
+// without Fujitsu's large pages, Tofu registers every new buffer it sends, and torch's
+// allocator keeps presenting new ones. TORCH_FUGAKU_STAGE_MB=0 sends the tensors themselves.
 #include <mpi.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
@@ -18,7 +19,8 @@
 
 namespace {
 
-constexpr size_t kStage = 8 << 20;  // bytes per staging buffer
+size_t kStage = 8 << 20;            // bytes per staging buffer; 0: no staging
+constexpr size_t kMaxCount = 1 << 30;  // MPI counts are int: direct calls go in pieces
 std::mutex mpi_mutex;               // MPI_THREAD_SERIALIZED: one caller at a time
 char *stage_in = nullptr, *stage_out = nullptr;
 
@@ -35,7 +37,8 @@ void ensure_init() {
   int ok = 0, provided = 0;
   MPI_Initialized(&ok);
   if (!ok) check(MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SERIALIZED, &provided), "MPI_Init_thread");
-  if (!stage_in) {
+  if (const char *mb = std::getenv("TORCH_FUGAKU_STAGE_MB")) kStage = std::strtoull(mb, nullptr, 10) << 20;
+  if (!stage_in && kStage > 0) {
     TORCH_CHECK(posix_memalign(reinterpret_cast<void **>(&stage_in), 1 << 21, kStage) == 0 &&
                     posix_memalign(reinterpret_cast<void **>(&stage_out), 1 << 21, kStage) == 0,
                 "fjmpi: cannot allocate staging buffers");
@@ -158,6 +161,11 @@ class FjMpiBackend : public c10d::Backend {
       check_tensor(t);
       char *p = static_cast<char *>(t.data_ptr());
       const size_t n = t.nbytes();
+      if (kStage == 0) {
+        for (size_t off = 0; off < n; off += kMaxCount)
+          check(MPI_Bcast(p + off, static_cast<int>(std::min(kMaxCount, n - off)), MPI_BYTE, root, comm_), "MPI_Bcast");
+        continue;
+      }
       for (size_t off = 0; off < n; off += kStage) {
         const size_t len = std::min(kStage, n - off);
         if (rank_ == root) std::memcpy(stage_in, p + off, len);
@@ -245,6 +253,12 @@ class FjMpiBackend : public c10d::Backend {
       TORCH_CHECK(in.nbytes() == out.nbytes() && in.nbytes() % size_ == 0,
                   "fjmpi: alltoall_base needs equal input and output divisible by the group size");
       const size_t n = in.nbytes() / size_;
+      if (kStage == 0) {
+        TORCH_CHECK(n <= kMaxCount, "fjmpi: alltoall block too large for one MPI call");
+        check(MPI_Alltoall(in.data_ptr(), static_cast<int>(n), MPI_BYTE, out.data_ptr(), static_cast<int>(n), MPI_BYTE,
+                           comm_), "MPI_Alltoall");
+        return done({out});
+      }
       const size_t chunk = kStage / size_;
       TORCH_CHECK(chunk > 0, "fjmpi: group too large for the staging buffer");
       const char *src = static_cast<const char *>(in.data_ptr());
@@ -295,11 +309,15 @@ class FjMpiBackend : public c10d::Backend {
       std::lock_guard<std::mutex> lock(mpi_mutex);
       const MPI_Datatype type = mpi_type(t);
       const MPI_Op mop = mpi_op(op, t);
-      const size_t es = t.element_size(), chunk = kStage / es;
+      const size_t es = t.element_size(), chunk = kStage ? kStage / es : kMaxCount;
       char *p = static_cast<char *>(t.data_ptr());
       const size_t n = t.numel();
       for (size_t off = 0; off < n; off += chunk) {
         const size_t cnt = std::min(chunk, n - off);
+        if (kStage == 0) {
+          check(MPI_Allreduce(MPI_IN_PLACE, p + off * es, static_cast<int>(cnt), type, mop, comm_), "MPI_Allreduce");
+          continue;
+        }
         std::memcpy(stage_in, p + off * es, cnt * es);
         check(MPI_Allreduce(MPI_IN_PLACE, stage_in, static_cast<int>(cnt), type, mop, comm_), "MPI_Allreduce");
         std::memcpy(p + off * es, stage_in, cnt * es);
@@ -320,11 +338,16 @@ class FjMpiBackend : public c10d::Backend {
       std::lock_guard<std::mutex> lock(mpi_mutex);
       const MPI_Datatype type = mpi_type(t);
       const MPI_Op mop = mpi_op(op, t);
-      const size_t es = t.element_size(), chunk = kStage / es;
+      const size_t es = t.element_size(), chunk = kStage ? kStage / es : kMaxCount;
       char *p = static_cast<char *>(t.data_ptr());
       const size_t n = t.numel();
       for (size_t off = 0; off < n; off += chunk) {
         const size_t cnt = std::min(chunk, n - off);
+        if (kStage == 0) {
+          void *sbuf = rank_ == root ? MPI_IN_PLACE : p + off * es;
+          check(MPI_Reduce(sbuf, p + off * es, static_cast<int>(cnt), type, mop, root, comm_), "MPI_Reduce");
+          continue;
+        }
         std::memcpy(stage_in, p + off * es, cnt * es);
         check(MPI_Reduce(stage_in, stage_out, static_cast<int>(cnt), type, mop, root, comm_), "MPI_Reduce");
         if (rank_ == root) std::memcpy(p + off * es, stage_out, cnt * es);
@@ -339,10 +362,17 @@ class FjMpiBackend : public c10d::Backend {
     check_tensor(in);
     TORCH_CHECK(out.nbytes() == in.nbytes() * size_, "fjmpi: allgather output must be group size x input");
     std::lock_guard<std::mutex> lock(mpi_mutex);
-    const size_t n = in.nbytes(), chunk = kStage / size_;
-    TORCH_CHECK(chunk > 0, "fjmpi: group too large for the staging buffer");
+    const size_t n = in.nbytes();
     const char *src = static_cast<const char *>(in.data_ptr());
     char *dst = static_cast<char *>(out.data_ptr());
+    if (kStage == 0) {
+      TORCH_CHECK(n <= kMaxCount, "fjmpi: allgather block too large for one MPI call");
+      check(MPI_Allgather(src, static_cast<int>(n), MPI_BYTE, dst, static_cast<int>(n), MPI_BYTE, comm_),
+            "MPI_Allgather");
+      return;
+    }
+    const size_t chunk = kStage / size_;
+    TORCH_CHECK(chunk > 0, "fjmpi: group too large for the staging buffer");
     for (size_t off = 0; off < n; off += chunk) {
       const size_t len = std::min(chunk, n - off);
       std::memcpy(stage_in, src + off, len);
@@ -353,6 +383,8 @@ class FjMpiBackend : public c10d::Backend {
   }
 
   // out = reduction over ranks of their in[rank * out.numel() : (rank + 1) * out.numel()].
+  // Arithmetic ops go as an all-to-all and a local reduction over ranks in rank order: Fujitsu
+  // MPI's MPI_Reduce_scatter_block moves data ~10x slower than its MPI_Allgather at 64 ranks.
   void scatter_reduce(at::Tensor &out, at::Tensor &in, const c10d::ReduceOp &op) {
     check_tensor(out);
     check_tensor(in);
@@ -363,23 +395,55 @@ class FjMpiBackend : public c10d::Backend {
       out.copy_(fo);
       return;
     }
+    const auto kind = op.op_;
+    const bool local = out.scalar_type() != at::kBool &&
+                       (kind == c10d::ReduceOp::SUM || kind == c10d::ReduceOp::AVG || kind == c10d::ReduceOp::MAX ||
+                        kind == c10d::ReduceOp::MIN || kind == c10d::ReduceOp::PRODUCT);
+    auto reduce_blocks = [&](at::Tensor blocks, at::Tensor o) {  // blocks: [size, cnt] -> o: [cnt]
+      switch (kind) {
+        case c10d::ReduceOp::MAX: at::amax_out(o, blocks, {0}); break;
+        case c10d::ReduceOp::MIN: at::amin_out(o, blocks, {0}); break;
+        case c10d::ReduceOp::PRODUCT: at::prod_out(o, blocks, 0); break;
+        default: at::sum_out(o, blocks, {0}); break;
+      }
+    };
+    at::Tensor flat_out = out.view({-1});
     {
       std::lock_guard<std::mutex> lock(mpi_mutex);
       const MPI_Datatype type = mpi_type(out);
       const MPI_Op mop = mpi_op(op, out);
-      const size_t es = out.element_size(), n = out.numel(), chunk = kStage / (es * size_);
-      TORCH_CHECK(chunk > 0, "fjmpi: group too large for the staging buffer");
+      const size_t es = out.element_size(), n = out.numel();
       const char *src = static_cast<const char *>(in.data_ptr());
       char *dst = static_cast<char *>(out.data_ptr());
-      for (size_t off = 0; off < n; off += chunk) {
+      if (kStage == 0) {
+        TORCH_CHECK(n * es <= kMaxCount, "fjmpi: reduce_scatter block too large for one MPI call");
+        if (local) {
+          at::Tensor recv = at::empty({size_, static_cast<int64_t>(n)}, out.options());
+          check(MPI_Alltoall(src, static_cast<int>(n * es), MPI_BYTE, recv.data_ptr(), static_cast<int>(n * es),
+                             MPI_BYTE, comm_), "MPI_Alltoall");
+          reduce_blocks(recv, flat_out);
+        } else {
+          check(MPI_Reduce_scatter_block(src, dst, static_cast<int>(n), type, mop, comm_), "MPI_Reduce_scatter_block");
+        }
+      }
+      const size_t chunk = kStage ? kStage / (es * size_) : 0;
+      TORCH_CHECK(kStage == 0 || chunk > 0, "fjmpi: group too large for the staging buffer");
+      for (size_t off = 0; kStage && off < n; off += chunk) {
         const size_t cnt = std::min(chunk, n - off);
         for (int r = 0; r < size_; ++r) std::memcpy(stage_in + r * cnt * es, src + (r * n + off) * es, cnt * es);
-        check(MPI_Reduce_scatter_block(stage_in, stage_out, static_cast<int>(cnt), type, mop, comm_),
-              "MPI_Reduce_scatter_block");
-        std::memcpy(dst + off * es, stage_out, cnt * es);
+        if (local) {
+          check(MPI_Alltoall(stage_in, static_cast<int>(cnt * es), MPI_BYTE, stage_out, static_cast<int>(cnt * es),
+                             MPI_BYTE, comm_), "MPI_Alltoall");
+          reduce_blocks(at::from_blob(stage_out, {size_, static_cast<int64_t>(cnt)}, out.options()),
+                        flat_out.narrow(0, static_cast<int64_t>(off), static_cast<int64_t>(cnt)));
+        } else {
+          check(MPI_Reduce_scatter_block(stage_in, stage_out, static_cast<int>(cnt), type, mop, comm_),
+                "MPI_Reduce_scatter_block");
+          std::memcpy(dst + off * es, stage_out, cnt * es);
+        }
       }
     }
-    if (op.op_ == c10d::ReduceOp::AVG) out.div_(size_);
+    if (kind == c10d::ReduceOp::AVG) out.div_(size_);
   }
 };
 
