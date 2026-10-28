@@ -4,8 +4,10 @@ Runs with TORCH_FUGAKU=0 so the stock kernels can be measured first in the
 same process. Fails on: accuracy beyond the measured bounds, inf/NaN
 behaviour differing from stock, the non-contiguous/float64 fallback not
 being bit-identical to stock, the 2-norm beyond stock's error or its other
-cases not taking the stock kernel bit for bit, bmm (and its gradients) not
-matching a slice-by-slice product.
+cases not taking the stock kernel bit for bit, mm/addmm with a transposed
+right operand beyond stock's error (or the other cases not taking the stock
+kernel bit for bit), bmm (and its gradients) not matching a slice-by-slice
+product.
 """
 import sys
 
@@ -62,6 +64,17 @@ norm_fb = lambda: (torch.linalg.vector_norm(nc), torch.linalg.vector_norm(f64), 
 nv_stock = nv.norm().item()
 nspecial_stock = {k: v.norm() for k, v in nspecial.items()}
 norm_fb_stock = norm_fb()
+# mm/addmm with a transposed right operand (nn.Linear's forward), and the cases that stay stock.
+gx, gw, gb = torch.randn(300, 1024), torch.randn(700, 1024) * 0.05, torch.randn(700)
+mm_ref = gx.double() @ gw.double().t()
+lin = torch.nn.Linear(1024, 700)
+lin_x = torch.randn(64, 1024, requires_grad=True)
+mm_fb = lambda: (gx @ gw.t().contiguous(), gx.double() @ gw.double().t(), gx[:8, :64] @ gw[:8, :64].t(),  # noqa: E731
+                 torch.addmm(gb, gx, gw.t().contiguous()))
+mm_stock, addmm_stock = gx @ gw.t(), torch.addmm(gb, gx, gw.t(), beta=0.5, alpha=2.0)
+mm_fb_stock = mm_fb()
+lin_out = lin(lin_x)
+lin_gx, lin_gw = torch.autograd.grad(lin_out.square().sum(), (lin_x, lin.weight))
 bx = torch.randn(512, 83, 32, dtype=torch.float64, requires_grad=True)
 by = torch.randn(512, 32, 83, dtype=torch.float64, requires_grad=True)
 bref = torch.bmm(bx, by)
@@ -71,6 +84,20 @@ torch_fugaku.enable()
 st = torch_fugaku.status()
 print(f"torch {torch.__version__}, torch_fugaku {st}")
 check("parbmm" in st["kernels"], "bmm override loaded")
+check("tmm" in st["kernels"], "transposed-B mm override loaded")
+scale = mm_ref.abs().max().item()
+e_new, e_stock = ((gx @ gw.t()).double() - mm_ref).abs().max().item(), (mm_stock.double() - mm_ref).abs().max().item()
+check(e_new <= max(2 * e_stock, 1e-6 * scale), f"mm X.W^T: max error {e_new / scale:.1e} (stock {e_stock / scale:.1e})")
+a_ref = 0.5 * gb.double() + 2.0 * mm_ref
+e_add = (torch.addmm(gb, gx, gw.t(), beta=0.5, alpha=2.0).double() - a_ref).abs().max().item()
+e_add_stock = (addmm_stock.double() - a_ref).abs().max().item()
+check(e_add <= max(2 * e_add_stock, 2e-6 * scale), f"addmm bias + X.W^T: max error {e_add / scale:.1e} (stock {e_add_stock / scale:.1e})")
+check(all(torch.equal(a, b) for a, b in zip(mm_fb_stock, mm_fb())),
+      "mm with contiguous/float64/small operands takes the stock kernel, bit for bit")
+out = lin(lin_x)
+hx, hw = torch.autograd.grad(out.square().sum(), (lin_x, lin.weight))
+check(torch.allclose(out, lin_out, rtol=1e-5, atol=1e-5) and torch.allclose(hx, lin_gx, rtol=1e-4, atol=1e-4)
+      and torch.allclose(hw, lin_gw, rtol=1e-4, atol=1e-4), "nn.Linear forward and gradients as stock")
 if st["sve"]:
     check("fastmath" in st["kernels"], "SVE kernels loaded on an SVE CPU")
     fast = run()

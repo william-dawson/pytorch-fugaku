@@ -3,7 +3,9 @@
 Three things, each through a public PyTorch interface:
 
 - CPU kernels (``TORCH_LIBRARY_IMPL``): ``bmm`` threaded over the batch (the
-  wheel multiplies one slice at a time without MKL), and SVE ``gelu``,
+  wheel multiplies one slice at a time without MKL), ``mm``/``addmm`` with a
+  transposed right operand (``nn.Linear``'s forward) through a fast transpose
+  and the plain GEMM, and SVE ``gelu``,
   ``gelu_backward`` and ``tanh`` from Arm Optimized Routines (the wheel's run
   near scalar speed on A64FX). The SVE kernels load only on CPUs with SVE.
 - Settings: oneDNN off (its ARM Compute Library path is ~3x slower in
@@ -50,7 +52,7 @@ def enable(kernels=True, onednn=False):
     if not onednn:
         torch.backends.mkldnn.enabled = False
     if kernels:
-        names = ["parbmm"] + (["fastmath"] if has_sve() else [])
+        names = ["parbmm", "tmm"] + (["fastmath"] if has_sve() else [])
         for name in names:
             torch.ops.load_library(os.path.join(_LIB, f"libtorch_fugaku_{name}.so"))
             _state["kernels"].append(name)

@@ -52,7 +52,9 @@ Also:
 
 It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
 
-- **A64FX kernels**: `bmm` threaded over the batch, SVE `gelu`,
+- **A64FX kernels**: `bmm` threaded over the batch, `mm`/`addmm` with a
+  transposed right operand (`nn.Linear`'s forward) through a fast transpose and
+  the plain GEMM, SVE `gelu`,
   `gelu_backward` and `tanh` from Arm Optimized Routines, and the whole-tensor
   2-norm that gradient clipping computes (threaded, double accumulation),
   registered as CPU kernels with `TORCH_LIBRARY_IMPL`.
@@ -115,6 +117,7 @@ Kernels on one CMG, 16 M float32 elements:
 | `tanh` | 43.5 ms | 4.0 ms |
 | `bmm`, 4096 x 32x32x32 | 111 ms | 7.2 ms |
 | `linalg_vector_norm` (gradient clipping), 163 M float32 in 149 tensors | 197 ms | 23 ms |
+| `X . W^T`, 2048x8192 by (2048x8192)^T (Llama `down_proj`) | 170 GF/s | 696 GF/s |
 
 ## Fujitsu's linear algebra (optional)
 
