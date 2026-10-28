@@ -66,9 +66,11 @@ if st["sve"]:
     for k, r in ref.items():
         e = ulp_err(fast[k], r)
         check(e <= bounds[k], f"{k}: {e:.2f} ULP (bound {bounds[k]}, stock {ulp_err(stock[k], r):.2f})")
-        same = (torch.isfinite(fast[k]) == torch.isfinite(stock[k])).all() and \
-            (torch.isnan(fast[k]) == torch.isnan(stock[k])).all()
-        check(bool(same), f"{k}: inf/NaN as stock")
+        diff = (torch.isfinite(fast[k]) != torch.isfinite(stock[k])) | (torch.isnan(fast[k]) != torch.isnan(stock[k]))
+        check(not bool(diff.any()), f"{k}: inf/NaN as stock")
+        for i in diff.nonzero().flatten()[:8].tolist():
+            print(f"        x={x[i].item():.6g} g={g[i].item():.6g}: torch_fugaku {fast[k][i].item():.6g}, "
+                  f"stock {stock[k][i].item():.6g}, FP64 {ref[k][i].item():.6g}")
     check(all(torch.equal(a, b) for a, b in zip(fb_stock, fallback())),
           "non-contiguous float32 and float64 take the stock kernel, bit for bit")
 else:
