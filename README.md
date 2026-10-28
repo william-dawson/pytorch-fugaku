@@ -52,9 +52,10 @@ Also:
 
 It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
 
-- **A64FX kernels**: `bmm` threaded over the batch, and SVE `gelu`,
-  `gelu_backward` and `tanh` from Arm Optimized Routines, registered as CPU
-  kernels with `TORCH_LIBRARY_IMPL`.
+- **A64FX kernels**: `bmm` threaded over the batch, SVE `gelu`,
+  `gelu_backward` and `tanh` from Arm Optimized Routines, and the whole-tensor
+  2-norm that gradient clipping computes (threaded, double accumulation),
+  registered as CPU kernels with `TORCH_LIBRARY_IMPL`.
 - **Gradients over Fujitsu MPI**: a DDP communication hook sums each gradient
   bucket with `MPI_Allreduce` over Tofu. The process group stays gloo; only
   the gradient transport changes.
@@ -110,6 +111,7 @@ Kernels on one CMG, 16 M float32 elements:
 | `gelu_backward` | 29.7 ms | 3.9 ms |
 | `tanh` | 43.5 ms | 4.0 ms |
 | `bmm`, 4096 x 32x32x32 | 111 ms | 7.2 ms |
+| `linalg_vector_norm` (gradient clipping), 163 M float32 in 149 tensors | 197 ms | 23 ms |
 
 ## Fujitsu's linear algebra (optional)
 

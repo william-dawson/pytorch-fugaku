@@ -3,8 +3,9 @@
 Runs with TORCH_FUGAKU=0 so the stock kernels can be measured first in the
 same process. Fails on: accuracy beyond the measured bounds, inf/NaN
 behaviour differing from stock, the non-contiguous/float64 fallback not
-being bit-identical to stock, bmm (and its gradients) not matching a
-slice-by-slice product.
+being bit-identical to stock, the 2-norm beyond stock's error or its other
+cases not taking the stock kernel bit for bit, bmm (and its gradients) not
+matching a slice-by-slice product.
 """
 import sys
 
@@ -49,6 +50,18 @@ nc = torch.randn(512, 513)[:, :512].t()
 f64 = torch.randn(4096, dtype=torch.float64)
 fallback = lambda: (torch.ops.aten.gelu(nc), torch.tanh(nc), torch.ops.aten.gelu(f64), torch.tanh(f64))
 stock, fb_stock = run(), fallback()
+# The 2-norm: a large tensor against FP64, overflow-prone and non-finite inputs, and the
+# cases that must stay stock (other ord, dim, keepdim, dtype, layout).
+nv = torch.randn(10_000_003) * 1e-3
+nv_ref = nv.double().norm().item()
+nspecial = {"huge": torch.full((1000,), 1e30), "inf": torch.tensor([1.0, float("inf")]),
+            "nan": torch.tensor([1.0, float("nan")])}
+norm_fb = lambda: (torch.linalg.vector_norm(nc), torch.linalg.vector_norm(f64), nv[:4096].norm(1),  # noqa: E731
+                   torch.linalg.vector_norm(nv[:4096], float("inf")), torch.randn(64, 64, generator=torch.Generator().manual_seed(3)).norm(dim=0),
+                   nv[:4096].reshape(64, 64).norm(dim=1, keepdim=True), torch.linalg.vector_norm(nv[:4096], dtype=torch.float64))
+nv_stock = nv.norm().item()
+nspecial_stock = {k: v.norm() for k, v in nspecial.items()}
+norm_fb_stock = norm_fb()
 bx = torch.randn(512, 83, 32, dtype=torch.float64, requires_grad=True)
 by = torch.randn(512, 32, 83, dtype=torch.float64, requires_grad=True)
 bref = torch.bmm(bx, by)
@@ -77,6 +90,18 @@ if st["sve"]:
                   f"stock {stock[k][i].item():.6g}, FP64 {ref[k][i].item():.6g}")
     check(all(torch.equal(a, b) for a, b in zip(fb_stock, fallback())),
           "non-contiguous float32 and float64 take the stock kernel, bit for bit")
+    rel = abs(nv.norm().item() - nv_ref) / nv_ref
+    check(rel <= max(1e-6, 2 * abs(nv_stock - nv_ref) / nv_ref),
+          f"2-norm of 10M float32: rel. error {rel:.1e} (stock {abs(nv_stock - nv_ref) / nv_ref:.1e})")
+    # The stock kernel accumulates in float32 here: it overflows on the huge input.
+    hn, href = nspecial["huge"].norm(), nspecial["huge"].double().norm()
+    check(bool(torch.isfinite(hn)) and abs(hn.item() - href.item()) / href.item() <= 1e-6,
+          f"2-norm of 1000 x 1e30 does not overflow: {hn.item():.4e} (FP64 {href.item():.4e}, "
+          f"stock {nspecial_stock['huge'].item():.4e})")
+    check(torch.equal(nspecial["inf"].norm(), nspecial_stock["inf"]) and bool(torch.isnan(nspecial["nan"].norm())),
+          "2-norm of inf and NaN inputs as stock")
+    check(all(torch.equal(a, b) for a, b in zip(norm_fb_stock, norm_fb())),
+          "other norms (ord, dim, keepdim, dtype, layout) take the stock kernel, bit for bit")
 else:
     check("fastmath" not in st["kernels"], "no SVE kernels on a CPU without SVE")
 out = torch.bmm(bx, by)
