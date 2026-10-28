@@ -58,6 +58,10 @@ It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
 - **Gradients over Fujitsu MPI**: a DDP communication hook sums each gradient
   bucket with `MPI_Allreduce` over Tofu. The process group stays gloo; only
   the gradient transport changes.
+- **A `torch.distributed` backend over Fujitsu MPI**, `"fjmpi"`, for code that
+  calls collectives itself (DeepSpeed's ZeRO, FSDP):
+  `init_process_group("fjmpi")`. All-reduce, broadcast, reduce, all-gather,
+  reduce-scatter, all-to-all, barrier and subgroups, on CPU tensors.
 - **Settings**: oneDNN off, `OMP_WAIT_POLICY=ACTIVE`.
 
 The same, explicitly (with `TORCH_FUGAKU=0`):
@@ -66,6 +70,7 @@ The same, explicitly (with `TORCH_FUGAKU=0`):
 import torch_fugaku
 torch_fugaku.enable()              # kernels and settings
 model = torch_fugaku.ddp(model)    # DistributedDataParallel with gradients over MPI
+torch_fugaku.register_backend()    # "fjmpi" for torch.distributed
 torch_fugaku.status()              # what is active
 ```
 
@@ -85,6 +90,17 @@ medium, FP32, batch 8 per rank, 4 ranks per node, normal mode), events/s:
 
 The stock wheel, run plainly in the same container, reaches 0.49 events/s on
 one node.
+
+DeepSpeed (0.19.8) training a GPT-2-small-sized model (163M parameters, FP32,
+2 sequences of 1024 per rank, 4 ranks per node, normal mode), seconds per step:
+
+| nodes | ZeRO-0, gloo | ZeRO-0, fjmpi | ZeRO-3, gloo | ZeRO-3, fjmpi |
+|---:|---:|---:|---:|---:|
+| 1 | 4.1 | 3.3 | 12.2 | 4.1 |
+| 2 | 12.2 | 3.5 | 24.0 | 4.5 |
+| 4 | 13.9 | 3.5 | 31.6 | 4.4 |
+
+Losses are identical between the two backends.
 
 Kernels on one CMG, 16 M float32 elements:
 

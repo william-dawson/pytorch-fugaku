@@ -12,8 +12,11 @@ Three things, each through a public PyTorch interface:
   sums each gradient bucket with MPI_Allreduce. On Fugaku that is Fujitsu MPI
   over Tofu, bound in at run time by ``pf-run``; the process group itself
   stays gloo.
+- A ``torch.distributed`` backend over MPI, ``"fjmpi"``
+  (``Backend.register_backend``), for frameworks that call collectives
+  directly (DeepSpeed's ZeRO): ``init_process_group("fjmpi")``.
 
-``enable()`` applies the first two; ``ddp(model)`` wraps a model in DDP with
+``enable()`` applies the first two and registers the backend; ``ddp(model)`` wraps a model in DDP with
 the MPI hook. In the pytorch-fugaku image both happen on ``import torch``
 (``TORCH_FUGAKU=1``), so unmodified scripts get them; see ``_autoload``.
 """
@@ -21,10 +24,10 @@ import atexit
 import ctypes
 import os
 
-__all__ = ["enable", "ddp", "mpi_comm_hook", "has_sve", "status"]
+__all__ = ["enable", "register_backend", "ddp", "mpi_comm_hook", "has_sve", "status"]
 
 _LIB = os.path.join(os.path.dirname(__file__), "lib")
-_state = {"enabled": False, "kernels": [], "mpi": None, "world": 0}
+_state = {"enabled": False, "kernels": [], "mpi": None, "world": 0, "backend": False}
 
 
 def has_sve():
@@ -51,6 +54,38 @@ def enable(kernels=True, onednn=False):
         for name in names:
             torch.ops.load_library(os.path.join(_LIB, f"libtorch_fugaku_{name}.so"))
             _state["kernels"].append(name)
+    register_backend()
+
+
+def _backend_module():
+    """The backend's extension module, with libmpi loaded RTLD_GLOBAL first: Open MPI's
+    PMIx plugins (Fujitsu's included) resolve libpmix's symbols globally, and Python
+    imports extension modules RTLD_LOCAL."""
+    if "c10d" not in _state:
+        ctypes.CDLL(os.path.join(_LIB, "libtorch_fugaku_mpi.so"), mode=ctypes.RTLD_GLOBAL)
+        from torch_fugaku import _c10d as mod
+
+        atexit.register(mod.finalize)
+        _state["c10d"] = mod
+    return _state["c10d"]
+
+
+def _create_backend(opts, pg_options):
+    return _backend_module().create(opts.store, opts.group_rank, opts.group_size,
+                          list(opts.global_ranks_in_group), str(opts.group_id))
+
+
+def register_backend():
+    """Register ``"fjmpi"`` with torch.distributed. Idempotent; MPI starts with the first group.
+
+    Ranks must be MPI_COMM_WORLD ranks (mpiexec + pf-run); a mismatch is an error.
+    """
+    import torch.distributed as dist
+
+    if _state["backend"] or not dist.is_available():
+        return
+    dist.Backend.register_backend("fjmpi", _create_backend, extended_api=True, devices=["cpu"])
+    _state["backend"] = True
 
 
 def _mpi():
@@ -127,4 +162,5 @@ def _hook_every_ddp():
 
 def status():
     """What is active in this process."""
-    return {"kernels": list(_state["kernels"]), "mpi_world": _state["world"], "sve": has_sve()}
+    return {"kernels": list(_state["kernels"]), "mpi_world": _state["world"], "sve": has_sve(),
+            "backend": "fjmpi" if _state["backend"] else None}

@@ -17,6 +17,10 @@ g++ -O3 -fopenmp csrc/parbmm.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_pa
 g++ -O3 -fopenmp -march=armv8.2-a+sve -Icsrc csrc/fastmath.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_fastmath.so"
 gcc -O2 -shared -fPIC csrc/mpi_allreduce.c -I/opt/openmpi/include -L/opt/openmpi/lib -lmpi \
   -o "$OUT/libtorch_fugaku_mpi.so"
+# The torch.distributed backend "fjmpi": a Python extension module over c10d::Backend.
+PYINC=$(python -c "import sysconfig; print(sysconfig.get_paths()['include'])")
+g++ -O2 csrc/c10d_mpi.cpp "${TORCH_FLAGS[@]}" -I"$PYINC" -I/opt/openmpi/include -ltorch_python \
+  -L/opt/openmpi/lib -lmpi -o torch_fugaku/_c10d.so
 cp -r torch_fugaku "$SITE/"
 cp torch_fugaku.pth "$SITE/"
 echo "torch_fugaku installed in $SITE"

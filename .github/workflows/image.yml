@@ -48,13 +48,19 @@ jobs:
       # are set here only, not in the image, since Fujitsu MPI also reads
       # OMPI_MCA_* variables.
       - name: Import and autoload
-        run: docker run --rm pytorch-fugaku:test python -c "import torch, torch_fugaku; s = torch_fugaku.status(); print(torch.__version__, s); assert 'parbmm' in s['kernels'] and not torch.backends.mkldnn.enabled"
+        run: docker run --rm pytorch-fugaku:test python -c "import torch, torch_fugaku; s = torch_fugaku.status(); print(torch.__version__, s); assert 'parbmm' in s['kernels'] and s['backend'] == 'fjmpi' and not torch.backends.mkldnn.enabled"
       - name: Kernels
         run: docker run --rm -e TORCH_FUGAKU=0 pytorch-fugaku:test python /opt/pytorch-fugaku/tests/test_kernels.py
       - name: DDP gradients over MPI, 2 ranks
         run: |
           docker run --rm -e TORCH_FUGAKU=0 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
             mpirun --allow-run-as-root --oversubscribe -np 2 python /opt/pytorch-fugaku/tests/test_ddp_mpi.py
+      - name: torch.distributed backend over MPI, 2 and 4 ranks
+        run: |
+          for n in 2 4; do
+            docker run --rm -e OMP_NUM_THREADS=1 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
+              mpirun --allow-run-as-root --oversubscribe -np $n python /opt/pytorch-fugaku/tests/test_backend_mpi.py
+          done
       - uses: docker/build-push-action@v6
         with:
           context: .
