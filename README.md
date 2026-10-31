@@ -83,6 +83,31 @@ torch_fugaku.status()              # what is active
 Switches: `TORCH_FUGAKU_KERNELS=0`, `TORCH_FUGAKU_ONEDNN=1`,
 `TORCH_FUGAKU_MPI=0|1|auto` (auto: on when mpiexec started the process).
 
+## Running DeepSpeed
+
+ZeRO (and FSDP) call `torch.distributed` collectives directly, so point DeepSpeed at the
+`"fjmpi"` backend instead of initialising a process group yourself:
+
+```python
+import torch_fugaku
+torch_fugaku.register_backend()
+import deepspeed
+deepspeed.init_distributed(dist_backend="fjmpi")
+```
+
+On the CPU accelerator (`DS_ACCELERATOR=cpu`), DeepSpeed JIT-compiles a shared-memory comm op
+with `ninja`/`gcc` the first time it's used; point `TORCH_EXTENSIONS_DIR` at a writable path
+(reusing it across runs is fine -- the build is keyed on torch/DeepSpeed's ABI, not your model).
+`num_workers=0` and `PF_BIND` apply the same as any other job (above).
+
+**`PF_FJBLAS=1` is not safe with more than one rank per node.** Two failure modes, both
+reproducible: at 2+ ranks per node, DeepSpeed's intra-node shared-memory comm setup deadlocks
+after it reports the comm op built successfully, before the first step; at exactly 1 rank per
+node but more than one physical node, the process-group rendezvous itself deadlocks instead.
+Confirmed by A/B: identical job, only `PF_FJBLAS` toggled -- with it, hangs through the wall-time
+limit at the point above; without it, completes normally. Only exactly one rank per CMG
+(4 ranks x 12 threads per node) is validated safe with `PF_FJBLAS=1` today.
+
 ## Performance
 
 [OmniLearned](https://github.com/ViniciusMikuni/OmniLearned) pretraining (PET v2
@@ -126,8 +151,8 @@ every thread on one core), and torch_fugaku then sends float32 GEMMs to Fujitsu'
 (`libfjlapackexsve`, loaded from the bound Fujitsu installation at run time; nothing of
 Fujitsu's is in the image). On one CMG it runs Llama-sized GEMMs at 1,000-1,200 GF/s against
 NVPL's 600-1,000. It pays with one rank per CMG (4 ranks x 12 threads per node): Llama-1B under
-DeepSpeed ZeRO-3 at 16 nodes went from 49.7 to 41.4 s per step. With fewer, wider ranks the
-threads spread across CMGs and it does not.
+DeepSpeed ZeRO-3 at 16 nodes went from 49.7 to 41.4 s per step. **With fewer, wider ranks it is
+not just a smaller win -- see the deadlock warning under "Running DeepSpeed."**
 
 ## LLVM cross-compilation (source route)
 
