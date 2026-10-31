@@ -1,0 +1,14 @@
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -1553,6 +1553,11 @@
+ target_link_libraries(torch_cpu PUBLIC c10)
+ target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
+ target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
++if(FUGAKU_FJ AND CMAKE_CROSSCOMPILING)
++  # The A64FX sysroot uses GCC 8's separate std::filesystem implementation.
++  target_link_libraries(torch_cpu PRIVATE stdc++fs)
++  target_link_options(torch_cpu PRIVATE "LINKER:-z,defs")
++endif()
+ target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
+ if(USE_MPI)
+   target_link_libraries(torch_cpu PRIVATE MPI::MPI_CXX)

@@ -1,0 +1,15 @@
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -828,9 +828,10 @@
+   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
+     set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+   endforeach()
++  get_filename_component(TORCH_BINARY_DIR_REAL "${CMAKE_BINARY_DIR}" REALPATH)
+   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
+-    get_filename_component(source_file "${source_file}" REALPATH)
+-    string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
++    get_filename_component(source_file_real "${source_file}" REALPATH)
++    string(FIND "${source_file_real}" "${TORCH_BINARY_DIR_REAL}" res)
+     if(res GREATER -1)
+       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+       continue()

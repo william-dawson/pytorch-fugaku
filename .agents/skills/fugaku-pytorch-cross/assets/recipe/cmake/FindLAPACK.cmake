@@ -1,0 +1,13 @@
+# Use the same validated LP64 Fujitsu implementation for BLAS and LAPACK.
+include(CheckFunctionExists)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+check_function_exists(dgesv_ FUGAKU_LAPACK_LINKS)
+cmake_pop_check_state()
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(LAPACK REQUIRED_VARS FUGAKU_LAPACK_LINKS BLAS_LIBRARIES)
+if(LAPACK_FOUND)
+  set(LAPACK_LIBRARIES "${BLAS_LIBRARIES}")
+  set(LAPACK_INFO Fujitsu)
+endif()

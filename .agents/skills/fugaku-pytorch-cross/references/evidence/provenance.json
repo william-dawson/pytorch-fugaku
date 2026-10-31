@@ -1,0 +1,71 @@
+{
+  "pytorch": {
+    "url": "https://github.com/pytorch/pytorch",
+    "ref": "v2.11.0",
+    "commit": "70d99e998b4955e0049d13a98d77ae1b14db1f45"
+  },
+  "recipe": {
+    "url": "https://github.com/tttapa/cross-pytorch",
+    "commit": "8a262aae82d254972c3d1b4065395bc8f3cd9412"
+  },
+  "cpu_dependencies": {
+    "pthreadpool": "4fe0e1e183925bf8cfa6aae24237e724a96479b8",
+    "onnx": "e709452ef2bbc1d113faf678c24e6d3467696e83",
+    "pybind11": "f5fbe867d2d26e4a0a9177a51f6e568868ad3dc8",
+    "fmt": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+    "pocketfft": "0fa0ef591e38c2758e3184c6c23e497b9f732ffa",
+    "eigen": "549bf8c75b6aae071cde2f28aa48f16ee3ae60b0",
+    "FXdiv": "b408327ac2a15ec3e43352421954f5b1967701d1",
+    "nlohmann": "55f93686c01528224f448c19128836e7df245f72",
+    "sleef": "5a1d179df9cf652951b59010a2d2075372d67f68",
+    "flatbuffers": "a2cd1ea3b6d3fee220106b5fed3f7ce8da9eb757",
+    "psimd": "072586a71b55b7f8c584153d223e95687148a900",
+    "cpp-httplib": "bd95e67c234930cd6d6bb11309588c5462c63cec",
+    "cpuinfo": "f858c30bcb16f8effd5ff46996f0514539e17abc",
+    "FP16": "4dfe081cf6bcd15db339cf2680b9281b8451eeb3",
+    "protobuf": "d1eca4e4b421cd2997495c4b4e65cea6be4e9b8a",
+    "mimalloc": "048d969a1c5ee2fb89c226298f41ea38445546ef",
+    "kineto": "7a731b6ae01cfc2b1fc75d83a91f84e682e43fd7"
+  },
+  "host_wheels": {
+    "PyYAML-6.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476",
+    "certifi-2026.10.23-py3-none-any.whl": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+    "charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl": "3d31298449090ab8d47b7b1b2a555ff73cac7ed438a08b7ac160980c7ebed649",
+    "cmake-3.31.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "2f766bb46367e5e0559fa33184653754bce044583a06014dcaebf8e6dff8a1f1",
+    "idna-3.20-py3-none-any.whl": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+    "ninja-1.11.1.4-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl": "096487995473320de7f65d622c3f1d16c3ad174797602218ca8c967f51ec38a0",
+    "numpy-2.2.6-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "fd83c01228a688733f1ded5201c678f0c53ecc1006ffbc404db9f7a899ac6249",
+    "packaging-25.0-py3-none-any.whl": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484",
+    "requests-2.32.5-py3-none-any.whl": "2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6",
+    "setuptools-80.9.0-py3-none-any.whl": "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922",
+    "six-1.17.0-py2.py3-none-any.whl": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+    "typing_extensions-4.15.0-py3-none-any.whl": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+    "urllib3-2.8.0-py3-none-any.whl": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+    "wheel-0.45.1-py3-none-any.whl": "708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248"
+  },
+  "target": "A64FX, LLVM 22.1.0, Fujitsu MPI, LP64 Fujitsu threaded BLAS/LAPACK, Fujitsu OpenMP",
+  "initial_artifact": "LibTorch with USE_DISTRIBUTED, USE_MPI, USE_C10D_MPI and USE_OPENMP enabled",
+  "source_supplements": {
+    "mimalloc-source.tar.gz": "536b5fa79266868422bb887591540c6e2d296a5ca250648ab7b7c81243e99012",
+    "kineto-source.tar.gz": "41516aa31cc42f709687efd1bc67b601df2db4295e2a53304148de4c9eebccb3"
+  },
+  "build_files": {
+    "build.sh": "ce8b388208a655995df2e9912d4868b263f6cd189f2ceada1a93bbf40b532c5d",
+    "launch.sh": "52ec94c29f6df085f34ab984413db33e1143f22c031f0b0e6b595b63fd6cffd8",
+    "check-build.py": "55a9b407c14f7c4889e3bfacf67d121f4b8683f5a89658c6926c116a9b1fec2f",
+    "fugaku-llvm.cmake": "c0c76268521dd1787040ec9bb57a992236316e07b7428e795cb1db5832548d9b",
+    "host-requirements.txt": "07573c5934607c164c55c6fd1ae69989e4b8200853d2910a91078e94cb77daa7",
+    "aten-sleef.patch": "419f3ee835af8a343df1118152f7207d08f38aec691e2e2c515f8a94bd97ebd1",
+    "cmake/FindLAPACK.cmake": "5808c18ca88452a735efff0c322cf46e24956cf77198cc42666cb981be92d7a0",
+    "smoke/CMakeLists.txt": "51994b04fccc2f8bcda3df76cebdf91e31bcb675a69d2c4240aadc95e1de28e8",
+    "smoke/main.cpp": "6b37163cf2a5615d0e3e52e097e0db290caf71ed035d4a2c2c062434513ae2ed",
+    "run-smoke.sh": "93b79a2d139484e21e200dd7613ebfcb943a654b1bbb9bc6ec171051b910b09d",
+    "smoke-job-spec.json": "8319c2880cd47c94e2aa1695c961a04147eabca31ee78de931981ee49b9aa56e",
+    "generated-paths.patch": "e4823931a8bcb23d9a933f9b8700b280571370082fb7079e13f95d8bf4b51a8d",
+    "semaphore-version.patch": "1aa8655729ef959f051ef0f038b463b1ba3ad98ae08dcd399baec5949669db99",
+    "atomic-value-type.patch": "4cb6d1cc2baa1e4c58c0625cc5944e92e22bf2130211fd1fdc51d9911a75dfc6",
+    "filesystem-link.patch": "c43d9373d0d1baca0b415200d7029e98df5431c7e737a303c66db5a92e2f8a5d"
+  },
+  "generated_file_warning_fix": "Canonicalize build-directory and source paths consistently; preserve original source path for CMake source properties.",
+  "parallel_jobs": 8
+}

@@ -1,0 +1,10 @@
+cmake==3.31.10
+ninja==1.11.1.4
+numpy==2.2.6
+packaging==25.0
+pyyaml==6.0.2
+requests==2.32.5
+six==1.17.0
+typing-extensions==4.15.0
+setuptools==80.9.0
+wheel==0.45.1

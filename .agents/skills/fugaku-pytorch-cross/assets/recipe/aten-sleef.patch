@@ -1,0 +1,26 @@
+diff --git a/aten/src/ATen/CMakeLists.txt b/aten/src/ATen/CMakeLists.txt
+index bf425af..1f21b1f 100644
+--- a/aten/src/ATen/CMakeLists.txt
++++ b/aten/src/ATen/CMakeLists.txt
+@@ -455,13 +455,17 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
+     list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
+     link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
+   else()
+-    add_library(sleef SHARED IMPORTED)
++    add_library(sleef_system UNKNOWN IMPORTED)
+     find_library(SLEEF_LIBRARY sleef)
+-    if(NOT SLEEF_LIBRARY)
++    find_path(SLEEF_INCLUDE sleef.h)
++    if(NOT SLEEF_LIBRARY OR NOT SLEEF_INCLUDE)
+       message(FATAL_ERROR "Cannot find sleef")
+     endif()
+-    message("Found sleef: ${SLEEF_LIBRARY}")
+-    set_target_properties(sleef PROPERTIES IMPORTED_LOCATION "${SLEEF_LIBRARY}")
++    message("Found sleef: ${SLEEF_LIBRARY} ${SLEEF_INCLUDE}")
++    set_target_properties(sleef_system PROPERTIES IMPORTED_LOCATION "${SLEEF_LIBRARY}")
++    target_include_directories(sleef_system SYSTEM INTERFACE "${SLEEF_INCLUDE}")
++    add_library(sleef INTERFACE)
++    target_link_libraries(sleef INTERFACE sleef_system)
+   endif()
+   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
+ 

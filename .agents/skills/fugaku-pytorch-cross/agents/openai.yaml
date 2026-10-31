@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fugaku PyTorch cross-compilation"
+  short_description: "Build and validate LLVM PyTorch on Fugaku"
+  default_prompt: "Use $fugaku-pytorch-cross to reproduce the LLVM PyTorch build and validate its MPI-enabled Python wheel on Fugaku."

@@ -129,6 +129,20 @@ NVPL's 600-1,000. It pays with one rank per CMG (4 ranks x 12 threads per node):
 DeepSpeed ZeRO-3 at 16 nodes went from 49.7 to 41.4 s per step. With fewer, wider ranks the
 threads spread across CMGs and it does not.
 
+## LLVM cross-compilation (source route)
+
+A separate source-build route cross-compiles PyTorch 2.11.0 on Fugaku's x86 login
+nodes for A64FX with LLVM 22.1.0, Fujitsu threaded BLAS/LAPACK, Fujitsu OpenMP and
+PyTorch's built-in `"mpi"` backend. It produces a Python 3.11 wheel independently
+of the container and `torch_fugaku` extension described above.
+
+The [Fugaku PyTorch cross-compilation skill](.agents/skills/fugaku-pytorch-cross/SKILL.md)
+contains pinned inputs, the build scripts and patches, a fresh-workspace
+reproduction procedure, troubleshooting, and recorded two-node C++/Python and
+asynchronous MPI tests. It also records 1/2/4-rank GEMM results and remaining
+performance/coverage limitations. Built wheels and commercial Fujitsu libraries
+are not stored in this repository.
+
 ## Build and update
 
 `Dockerfile` builds on any arm64 Linux host. CI builds it on GitHub's arm64

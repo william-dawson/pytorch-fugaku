@@ -1,0 +1,119 @@
+{
+  "wheel": "torch-2.11.0+fugaku.llvm-cp311-cp311-linux_aarch64.whl",
+  "wheel_sha256": "326306e3d147f01f53bfc06e97c0ba30a179b1524113d2abb2fd33ab705cbef6",
+  "build_exit_code": 0,
+  "runtime_job": "53149105",
+  "runtime_exit_code": 0,
+  "smoke_ranks": [
+    {
+      "rank": 0,
+      "host": "a01-0106c",
+      "torch": "2.11.0+fugaku.llvm",
+      "module": "/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/wheel-install/torch/__init__.py",
+      "threads": 48,
+      "GEMM": "PASS",
+      "LAPACK": "PASS",
+      "autograd": "PASS",
+      "NumPy": "PASS",
+      "MPI": "PASS",
+      "OpenMP": "PASS"
+    },
+    {
+      "rank": 1,
+      "host": "a01-0114c",
+      "torch": "2.11.0+fugaku.llvm",
+      "module": "/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/wheel-install/torch/__init__.py",
+      "threads": 48,
+      "GEMM": "PASS",
+      "LAPACK": "PASS",
+      "autograd": "PASS",
+      "NumPy": "PASS",
+      "MPI": "PASS",
+      "OpenMP": "PASS"
+    }
+  ],
+  "benchmark_conditions": {
+    "matrix_n": 4096,
+    "repetitions": 3,
+    "statistic": "maximum across ranks of mean seconds per GEMM",
+    "nodes": 1,
+    "requested_frequency_mhz": 2000,
+    "eco_state": 0,
+    "queue": "f-pt"
+  },
+  "benchmarks": [
+    {
+      "ranks": 1,
+      "threads_per_rank": 48,
+      "n": 4096,
+      "dtype": "torch.float32",
+      "max_rank_seconds": 0.038666373351588845,
+      "aggregate_tflops": 3.5544826566040615,
+      "correctness": "PASS",
+      "host": "a01-0209c",
+      "job_id": "53149351"
+    },
+    {
+      "ranks": 1,
+      "threads_per_rank": 48,
+      "n": 4096,
+      "dtype": "torch.float64",
+      "max_rank_seconds": 0.061681826055670776,
+      "aggregate_tflops": 2.2281920341974772,
+      "correctness": "PASS",
+      "host": "a01-0209c",
+      "job_id": "53149351"
+    },
+    {
+      "ranks": 2,
+      "threads_per_rank": 24,
+      "n": 4096,
+      "dtype": "torch.float32",
+      "max_rank_seconds": 0.060853570932522416,
+      "aggregate_tflops": 4.517038240020439,
+      "correctness": "PASS",
+      "host": "a01-0105c",
+      "job_id": "53149353"
+    },
+    {
+      "ranks": 2,
+      "threads_per_rank": 24,
+      "n": 4096,
+      "dtype": "torch.float64",
+      "max_rank_seconds": 0.122847530990839,
+      "aggregate_tflops": 2.237553369831244,
+      "correctness": "PASS",
+      "host": "a01-0105c",
+      "job_id": "53149353"
+    },
+    {
+      "ranks": 4,
+      "threads_per_rank": 12,
+      "n": 4096,
+      "dtype": "torch.float32",
+      "max_rank_seconds": 0.12495176563970745,
+      "aggregate_tflops": 4.39974426190339,
+      "correctness": "PASS",
+      "host": "a01-0214c",
+      "job_id": "53149355"
+    },
+    {
+      "ranks": 4,
+      "threads_per_rank": 12,
+      "n": 4096,
+      "dtype": "torch.float64",
+      "max_rank_seconds": 0.3010765036257605,
+      "aggregate_tflops": 1.8259671786654899,
+      "correctness": "PASS",
+      "host": "a01-0214c",
+      "job_id": "53149355"
+    }
+  ],
+  "remote_workspace": "/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross",
+  "core_reference_commit": "70d99e998b4955e0049d13a98d77ae1b14db1f45",
+  "async_mpi": {
+    "job_id": "53149769",
+    "status": "PASS",
+    "results": "mpi-async-results.json"
+  }
+}

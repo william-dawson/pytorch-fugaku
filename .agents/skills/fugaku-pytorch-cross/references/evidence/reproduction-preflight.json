@@ -1,0 +1,14 @@
+{
+  "kind": "local-offline-preflight",
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "source_commit": "70d99e998b4955e0049d13a98d77ae1b14db1f45",
+  "dependency_pins": 17,
+  "sealed_inputs_verified": 61,
+  "patches_applied_and_reversed": 5,
+  "shell_syntax": "PASS",
+  "python_syntax": "PASS",
+  "target_numpy_elf": "AArch64",
+  "historical_pass_records_absent": true,
+  "target_compilation_performed": false,
+  "fresh_cluster_reproduction_performed": false
+}

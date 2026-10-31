@@ -1,0 +1,113 @@
+{
+  "job_id": "53149769",
+  "application_exit_code": 0,
+  "nodes": 2,
+  "mpi_ranks": 2,
+  "threads_per_rank": 12,
+  "queue": "f-pt",
+  "status": "PASS",
+  "ranks": [
+    {
+      "rank": 0,
+      "host": "a01-0101c",
+      "hosts": [
+        "a01-0101c",
+        "a01-0200c"
+      ],
+      "torch": "2.11.0+fugaku.llvm",
+      "threads": 12,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "async_all_reduce_delayed_peer",
+          "status": "PASS",
+          "api_seconds": 0.00023084902204573154,
+          "compute_seconds": 0.0010920760687440634,
+          "pending_before_compute": true,
+          "pending_after_compute": true,
+          "peer_delay_seconds": 3.0
+        },
+        {
+          "case": "queued_all_reduce_and_futures",
+          "status": "PASS",
+          "operations": 3
+        },
+        {
+          "case": "async_broadcast",
+          "status": "PASS"
+        },
+        {
+          "case": "async_all_gather",
+          "status": "PASS"
+        },
+        {
+          "case": "async_barrier",
+          "status": "PASS"
+        },
+        {
+          "case": "delayed_isend_irecv",
+          "status": "PASS",
+          "operation": "isend",
+          "api_seconds": 0.0008900859393179417
+        },
+        {
+          "case": "bidirectional_isend_irecv",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "rank": 1,
+      "host": "a01-0200c",
+      "hosts": [
+        "a01-0101c",
+        "a01-0200c"
+      ],
+      "torch": "2.11.0+fugaku.llvm",
+      "threads": 12,
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "async_all_reduce_delayed_peer",
+          "status": "PASS",
+          "api_seconds": 0.00026810006238520145,
+          "compute_seconds": 0.006590147968381643,
+          "pending_before_compute": true,
+          "pending_after_compute": false,
+          "peer_delay_seconds": 3.0
+        },
+        {
+          "case": "queued_all_reduce_and_futures",
+          "status": "PASS",
+          "operations": 3
+        },
+        {
+          "case": "async_broadcast",
+          "status": "PASS"
+        },
+        {
+          "case": "async_all_gather",
+          "status": "PASS"
+        },
+        {
+          "case": "async_barrier",
+          "status": "PASS"
+        },
+        {
+          "case": "delayed_isend_irecv",
+          "status": "PASS",
+          "operation": "irecv",
+          "api_seconds": 9.043002501130104e-05,
+          "initially_pending": true,
+          "completion_polls": 387
+        },
+        {
+          "case": "bidirectional_isend_irecv",
+          "status": "PASS"
+        }
+      ]
+    }
+  ],
+  "script_sha256": "1b6f6748e657e790c0dd36c3ba69d2165e3bdb2e4d0a8a6b62502832ccdd3d41",
+  "interpretation": "Python async collectives use the ProcessGroupMPI worker thread with blocking MPI collectives. Point-to-point requests use MPI_Isend/MPI_Irecv. This validates asynchronous API behavior and correctness, not production communication/computation speedup."
+}

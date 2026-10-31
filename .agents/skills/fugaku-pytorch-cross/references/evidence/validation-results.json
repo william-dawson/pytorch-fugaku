@@ -1,0 +1,40 @@
+{
+  "artifact": "LibTorch 2.11.0, CPU, A64FX",
+  "compiler": "LLVM 22.1.0",
+  "mpi": "Fujitsu MPI",
+  "blas_lapack": "Fujitsu libfjlapackexsve",
+  "openmp": "Fujitsu libfjomp",
+  "build_jobs": 8,
+  "build_exit_code": 0,
+  "job_id": "53142196",
+  "queue": "f-pt",
+  "nodes": 2,
+  "mpi_ranks": 2,
+  "openmp_threads_per_rank": 48,
+  "requested_frequency_mhz": 2000,
+  "eco_state": 0,
+  "application_exit_code": 0,
+  "ranks": [
+    {
+      "rank": 0,
+      "host": "a01-2005c",
+      "GEMM": "PASS",
+      "LAPACK": "PASS",
+      "autograd": "PASS",
+      "ProcessGroupMPI": "PASS",
+      "OpenMP": "PASS"
+    },
+    {
+      "rank": 1,
+      "host": "a01-2204b",
+      "GEMM": "PASS",
+      "LAPACK": "PASS",
+      "autograd": "PASS",
+      "ProcessGroupMPI": "PASS",
+      "OpenMP": "PASS"
+    }
+  ],
+  "python_bindings_built": false,
+  "performance_benchmarked": false,
+  "remote_prefix": "/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/target"
+}

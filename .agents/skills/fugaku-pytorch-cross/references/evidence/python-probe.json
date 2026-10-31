@@ -1,0 +1,14 @@
+{
+  "machine": "aarch64",
+  "python": "3.11.5 (main, Sep 11 2023, 13:14:08) [GCC 11.2.0]",
+  "executable": "/vol0402/data/ra000009/u10035/miniconda3/bin/python3.11",
+  "config": {
+    "VERSION": "3.11",
+    "SOABI": "cpython-311-aarch64-linux-gnu",
+    "EXT_SUFFIX": ".cpython-311-aarch64-linux-gnu.so",
+    "MULTIARCH": "aarch64-linux-gnu",
+    "Py_ENABLE_SHARED": 0,
+    "SIZEOF_VOID_P": 8,
+    "Py_DEBUG": 0
+  }
+}

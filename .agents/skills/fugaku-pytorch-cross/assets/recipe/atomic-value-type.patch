@@ -1,0 +1,11 @@
+--- a/torch/nativert/executor/memory/LayoutPlanner.h
++++ b/torch/nativert/executor/memory/LayoutPlanner.h
+@@ -29,7 +29,7 @@
+ template <typename T>
+ void atomic_set_max(
+     std::atomic<T>* pv,
+-    typename std::atomic<T>::value_type v,
++    T v,
+     std::memory_order m = std::memory_order_seq_cst) noexcept {
+   auto const mr = drop_release(m);
+   auto t = (mr != m) ? pv->fetch_add(0, m) : pv->load(mr);

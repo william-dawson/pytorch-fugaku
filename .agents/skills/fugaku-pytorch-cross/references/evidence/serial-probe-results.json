@@ -1,0 +1,48 @@
+{
+  "stage": "LLVM + Fujitsu MPI + serial Fujitsu BLAS/LAPACK probe",
+  "compiler": "Clang 22.1.0",
+  "target": "aarch64-unknown-linux-gnu",
+  "cpu": "a64fx",
+  "sysroot": "/opt/FJSVxos/devkit/aarch64/rfs",
+  "cross_linker": "/opt/FJSVxos/devkit/aarch64/bin/aarch64-linux-gnu-ld",
+  "build": "passed",
+  "binary": "/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-step1/probe-serial-blas",
+  "blas": "libfjlapacksve.so.1",
+  "mpi": "libmpi.so.0",
+  "openmp": "libomp.so",
+  "runtime": "passed with LLVM libomp.so preloaded",
+  "job_id": "53087681",
+  "job_script": "/vol0004/mdt3/home/u10035/agent/jobs/llvm-fj-probe-20261030-214126.sh",
+  "queue": "small",
+  "nodes": 2,
+  "mpi_ranks": 2,
+  "omp_threads_per_rank": 12,
+  "walltime_limit": "00:05:00",
+  "diagnosis": "Without preload, libfj90i.so.1 shadows OpenMP API symbols. Preloading LLVM libomp restores 12-thread execution and all checks pass.",
+  "validation_job_id": "53088307",
+  "validation_queue": "f-pt",
+  "validation_exit_code": 0,
+  "validation_hosts": [
+    "a03-0103c",
+    "a03-0110s"
+  ],
+  "checks": [
+    "FP32 GEMM N/N and T/N against scalar reference on both ranks",
+    "FP64 GEMM N/N and T/N against scalar reference on both ranks",
+    "LP64 LAPACK DGESV known solution on both ranks",
+    "MPI Allreduce across two distinct compute nodes",
+    "12 OpenMP threads per rank",
+    "Symbol origins: Fujitsu MPI, Fujitsu serial SVE BLAS/LAPACK, LLVM OpenMP"
+  ],
+  "limitations": [
+    "Serial Fujitsu BLAS only; threaded Fujitsu BLAS not yet tested",
+    "Small correctness probe only; no performance claim",
+    "PyTorch has not yet been cross-compiled"
+  ],
+  "required_environment": {
+    "OMP_NUM_THREADS": "12",
+    "OMP_DYNAMIC": "FALSE",
+    "LD_LIBRARY_PATH": "/vol0004/apps/r/OSS_CN/llvm-22.1.0/cross_clangfx/lib64:/opt/FJSVxtclanga/tcsds-latest/lib64",
+    "LD_PRELOAD": "/vol0004/apps/r/OSS_CN/llvm-22.1.0/cross_clangfx/lib64/libomp.so"
+  }
+}
