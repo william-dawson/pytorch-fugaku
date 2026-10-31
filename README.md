@@ -136,6 +136,19 @@ nodes for A64FX with LLVM 22.1.0, Fujitsu threaded BLAS/LAPACK, Fujitsu OpenMP a
 PyTorch's built-in `"mpi"` backend. It produces a Python 3.11 wheel independently
 of the container and `torch_fugaku` extension described above.
 
+The build first prepares native code generators on x86, then cross-compiles
+LibTorch and its MPI backend. After validating the core on compute nodes, it
+builds the Python bindings against AArch64 Python headers and packages the
+wheel. The resulting wheel has passed two-node tests for matrix multiplication,
+LAPACK, autograd, NumPy interoperability, OpenMP and blocking/asynchronous MPI
+operations. Initial one-node GEMM measurements cover 1, 2 and 4 MPI ranks.
+
+**The head-to-head (H2H) comparison with the existing container/`torch_fugaku`
+approach is still in progress.** These functional tests and GEMM measurements
+do not establish end-to-end training performance or a preferred route. The
+model-training results elsewhere in this README describe the container approach;
+they are not results for the new cross-compiled wheel.
+
 The [Fugaku PyTorch cross-compilation skill](.agents/skills/fugaku-pytorch-cross/SKILL.md)
 contains pinned inputs, the build scripts and patches, a fresh-workspace
 reproduction procedure, troubleshooting, and recorded two-node C++/Python and
