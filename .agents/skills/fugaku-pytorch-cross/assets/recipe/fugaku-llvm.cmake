@@ -31,3 +31,9 @@ foreach(lang C CXX)
   set(OpenMP_${lang}_LIB_NAMES fjomp CACHE STRING "")
 endforeach()
 set(OpenMP_fjomp_LIBRARY ${FUGAKU_FJ}/lib64/libfjomp.so CACHE FILEPATH "")
+
+# Retain the large-page allocator before other shared-library dependencies.
+set(FUGAKU_MMM /opt/FJSVxos/devkit/aarch64/rfs/opt/FJSVxos/mmm)
+set(FUGAKU_MPG_LINK "-L${FUGAKU_MMM}/lib64 -Wl,--push-state,--no-as-needed -lmpg -Wl,--pop-state -Wl,-rpath,/opt/FJSVxos/mmm/lib64")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "${FUGAKU_MPG_LINK} ${CMAKE_SHARED_LINKER_FLAGS_INIT}")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${FUGAKU_MPG_LINK} ${CMAKE_EXE_LINKER_FLAGS_INIT}")

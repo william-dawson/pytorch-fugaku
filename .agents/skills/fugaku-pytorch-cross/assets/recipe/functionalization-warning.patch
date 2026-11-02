@@ -1,0 +1,13 @@
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -830,6 +830,10 @@
+   endforeach()
+   get_filename_component(TORCH_BINARY_DIR_REAL "${CMAKE_BINARY_DIR}" REALPATH)
+   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
++    if(source_file MATCHES "RegisterFunctionalization_[0-9]+[.]cpp$")
++      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
++      continue()
++    endif()
+     get_filename_component(source_file_real "${source_file}" REALPATH)
+     string(FIND "${source_file_real}" "${TORCH_BINARY_DIR_REAL}" res)
+     if(res GREATER -1)

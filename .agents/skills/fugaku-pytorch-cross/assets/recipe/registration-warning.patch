@@ -1,0 +1,17 @@
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -841,6 +841,14 @@
+     endif()
+   endforeach()
+ endif()
++if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
++  get_target_property(FUGAKU_GENERATED_SOURCES torch_cpu SOURCES)
++  foreach(source_file IN LISTS FUGAKU_GENERATED_SOURCES)
++    if(source_file MATCHES "Register[^/]*[.]cpp$")
++      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
++    endif()
++  endforeach()
++endif()
+ if(USE_MPS)
+   if(CAN_COMPILE_METAL)
+     add_dependencies(torch_cpu metallibs)

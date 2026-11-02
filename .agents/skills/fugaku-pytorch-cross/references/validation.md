@@ -1,5 +1,9 @@
 # Compute-node validation and MPI semantics
 
+**November 2026 update:** see [large-pages.md](large-pages.md) for the fresh
+allocator rebuild, linked runner, current validation and performance limitations.
+Earlier benchmark records below describe the previous allocator build.
+
 ## Runtime and scheduler settings
 
 The successful jobs used project `ra000009`, `f-pt`, and exactly one cache

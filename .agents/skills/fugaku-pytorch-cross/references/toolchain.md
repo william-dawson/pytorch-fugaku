@@ -1,5 +1,9 @@
 # Toolchain and ABI decisions
 
+**November 2026 update:** see [large-pages.md](large-pages.md) for the fresh
+allocator rebuild, linked runner, current validation and performance limitations.
+Earlier benchmark records below describe the previous allocator build.
+
 ## Which binaries run where
 
 | Component | Executes on | Produces/uses |

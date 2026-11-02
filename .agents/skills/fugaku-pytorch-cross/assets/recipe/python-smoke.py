@@ -1,3 +1,4 @@
+import os
 import json
 import socket
 import numpy as np
@@ -8,7 +9,7 @@ assert dist.is_mpi_available(), 'MPI backend missing from Python bindings'
 dist.init_process_group('mpi')
 rank, size = dist.get_rank(), dist.get_world_size()
 assert torch.backends.openmp.is_available()
-torch.set_num_threads(48)
+torch.set_num_threads(int(os.environ.get('OMP_NUM_THREADS', '12')))
 x = torch.ones((64, 64), dtype=torch.float64, requires_grad=True)
 y = x @ torch.ones_like(x)
 y.sum().backward()

@@ -1,0 +1,51 @@
+{
+  "rank": 1,
+  "host": "a01-6103c",
+  "hosts": [
+    "a01-6110s",
+    "a01-6103c"
+  ],
+  "torch": "2.11.0+fugaku.llvm",
+  "threads": 12,
+  "status": "PASS",
+  "cases": [
+    {
+      "case": "async_all_reduce_delayed_peer",
+      "status": "PASS",
+      "api_seconds": 0.0003050188533961773,
+      "compute_seconds": 0.007141981972381473,
+      "pending_before_compute": true,
+      "pending_after_compute": false,
+      "peer_delay_seconds": 3.0
+    },
+    {
+      "case": "queued_all_reduce_and_futures",
+      "status": "PASS",
+      "operations": 3
+    },
+    {
+      "case": "async_broadcast",
+      "status": "PASS"
+    },
+    {
+      "case": "async_all_gather",
+      "status": "PASS"
+    },
+    {
+      "case": "async_barrier",
+      "status": "PASS"
+    },
+    {
+      "case": "delayed_isend_irecv",
+      "status": "PASS",
+      "operation": "irecv",
+      "api_seconds": 0.00010009016841650009,
+      "initially_pending": true,
+      "completion_polls": 387
+    },
+    {
+      "case": "bidirectional_isend_irecv",
+      "status": "PASS"
+    }
+  ]
+}

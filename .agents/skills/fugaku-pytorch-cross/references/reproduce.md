@@ -67,7 +67,7 @@ wheels built by this recipe, or historical validation results.
 The prepared Python 3.11 generator venv is isolated and gets pinned PyYAML
 6.0.2 and NumPy 2.2.6 x86 wheels. The original successful run inherited YAML
 and NumPy 2.2.1 from its pre-existing front environment; this explicit isolation
-is a reproducibility adaptation that still needs a fresh full cluster run.
+was exercised by the fresh November 2026 core and Python rebuild.
 
 Transfer the prepared tree to exactly `--remote-root`, using a typed filesystem
 upload/extract or an approved transfer. An archive can be made outside the tree:
@@ -83,7 +83,7 @@ python3 "$SKILL/scripts/validate-stage.py" /path/to/new-local-stage
 python3 "$SKILL/scripts/test-record-validation.py"
 ```
 
-The preflight exercises all five patches in an isolated temporary copy, reverses
+The preflight exercises all eight patches in an isolated temporary copy, reverses
 them, verifies the input seals and AArch64 NumPy extension, and checks helper
 syntax. It neither compiles target code nor submits a job. The original local
 preflight report is in `references/evidence/reproduction-preflight.json`.
@@ -96,7 +96,15 @@ generated files are excluded from the launch-time checksum check. If a helper
 is deliberately changed, restage from the reviewed recipe into a new workspace
 instead of silently bypassing a checksum failure.
 
-## 3. Build and validate LibTorch
+## 3. Build the linked Python runner and validate allocation
+
+First run `bash /absolute/new/workspace/preflight-launch.sh` on the x86 login
+node. Require `preflight-exit.txt` = 0. Submit `job-allocator-r1.json` and inspect
+its output for a 2 MiB allocation with nonzero Private_Hugetlb before continuing.
+The runner embeds the supplied target Python prefix; no PYTHONHOME override is
+needed. The preflight shares the build lock and retains previous logs.
+
+## 4. Build and validate LibTorch
 
 On the x86 login node, in the staged remote tree:
 
@@ -108,7 +116,7 @@ The launcher records `build.host`, `build.pid`, `build.log`, `status.txt` and
 `exit-code.txt`, and keeps a shared lock throughout the build. `build.sh`:
 
 1. Creates the native x86 host venv from offline wheels.
-2. Applies the five patches idempotently.
+2. Applies the eight patches idempotently.
 3. Builds and installs host protoc with `/usr/bin/gcc` and `/usr/bin/g++`.
 4. Builds native SLEEF, then cross-builds static target SLEEF with
    `NATIVE_BUILD_DIR` pointing to the native build and `SVE_VECTOR_BITS=512`.
@@ -138,7 +146,7 @@ This requires a successful build and application exit plus all expected PASS
 markers on two different hosts. It creates a **new** `validation-results.json`.
 The Python launcher requires that record; preparation does not manufacture it.
 
-## 4. Build and package Python
+## 5. Build and package Python
 
 After the two-node core test passes:
 
@@ -190,9 +198,10 @@ explicit cp311/linux_aarch64 target options, without executing target Python
 on x86 or modifying the user's Python installation. Wait for
 `ready-for-python-runtime-validation` and Python build exit code 0.
 
-## 5. Validate the installed wheel
+## 6. Validate the installed wheel
 
-Run the generated two-node smoke and async specs, then the three separate
+Run `job-largepage-r2.json` to verify actual tensor huge pages and loaded runtimes,
+then the generated two-node smoke and async specs, followed by the three separate
 one-node benchmark specs. The rank wrapper imports from `wheel-install/` and
 the isolated `runtime-site/`, not the source checkout or another installed torch.
 Record each new job with `record-validation.py smoke|async|benchmark JOB_ID`;
@@ -203,3 +212,15 @@ Archive new source/input pins, script hashes, resolved toolchain versions,
 build logs, job specs, complete outputs, exit codes and wheel SHA-256. Compare
 behavior and metrics with results.md, not only filenames. A rebuilt wheel may
 have a different byte checksum due to timestamps or documented staging changes.
+
+For the large-page job, inspect both `fresh_runtime_pass` records and
+`validation-exit.JOB_ID.txt`; it has no `record-validation.py` mode. The rank
+wrapper uses `bin/python3.11-fugaku`, clears application library overrides and
+selects only the fresh wheel/runtime dependencies. Fujitsu's `mpiexec` itself
+needs its library directory: the scripts provide it only to the launcher, then
+clear it in the rank process. Do not remove that launcher-only setting.
+
+The original smoke script hardcoded 48 threads; the current helper honors
+OMP_NUM_THREADS (12 in the two-node checks). The new generic wrappers have local
+syntax/staging validation; the actual November compute jobs used equivalent
+explicit commands, documented in [large-pages.md](large-pages.md).

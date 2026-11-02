@@ -36,12 +36,12 @@ def copy_wheels(source, target, entries):
 
 def job_spec(root, project, mode, ranks, nodes):
     ppn = ranks // nodes
-    threads = 12 if mode == 'async' else 48 // ppn
+    threads = 48 // ppn if mode == 'benchmark' else 12
     return {'name': 'cross-' + mode + '-r' + str(ranks), 'directory': root,
             'executable': '/bin/bash', 'arguments': ['./run-validation.sh', mode, str(ranks)], 'launcher': 'env',
             'attributes': {'account': project, 'queue_name': 'f-pt', 'duration': '00:05:00',
                            'custom_attributes': {'gfscache_volume': '/vol0004', '--mpi': f'max-proc-per-node={ppn}',
-                                                 '-L': 'jobenv=linux2,freq=2000,eco_state=0'}},
+                                                 '-L': 'freq=2000,eco_state=0'}},
             'resources': {'node_count': nodes, 'processes_per_node': ppn, 'cpu_cores_per_process': threads}}
 
 def main():
@@ -92,7 +92,7 @@ def main():
         '/opt/FJSVxos/devkit/aarch64/rfs': args.sysroot,
     }
     for path in root.rglob('*'):
-        if path.is_file() and 'src' not in path.relative_to(root).parts and path.suffix in ('.sh', '.py', '.cmake', '.txt'):
+        if path.is_file() and 'src' not in path.relative_to(root).parts and path.suffix in ('.sh', '.py', '.cmake', '.txt', '.c'):
             text = path.read_text()
             for old, new in replacements.items():
                 text = text.replace(old, new)
@@ -105,12 +105,12 @@ def main():
     path.write_text(text)
     # Pin the release metadata even when the source export has no .git directory.
     path = root / 'build.sh'
-    text = path.read_text().replace('export PYTHONNOUSERSITE=1', 'export PYTORCH_BUILD_NUMBER=1\nexport PYTHONNOUSERSITE=1')
+    text = path.read_text()
     path.write_text(text)
     for name in ('launch.sh', 'launch-python.sh', 'record-validation.py', 'run-validation.sh'):
         shutil.copy2(SKILL / 'scripts' / name, root / name)
     (root / 'source-lock.json').write_text(json.dumps(LOCK, indent=2) + '\n')
-    for mode, ranks, nodes in [('libtorch', 2, 2), ('smoke', 2, 2), ('async', 2, 2), ('benchmark', 1, 1), ('benchmark', 2, 1), ('benchmark', 4, 1)]:
+    for mode, ranks, nodes in [('allocator', 1, 1), ('largepage', 2, 2), ('libtorch', 2, 2), ('smoke', 2, 2), ('async', 2, 2), ('benchmark', 1, 1), ('benchmark', 2, 1), ('benchmark', 4, 1)]:
         (root / f'job-{mode}-r{ranks}.json').write_text(json.dumps(job_spec(args.remote_root, args.project, mode, ranks, nodes), indent=2) + '\n')
     subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-index', '--no-deps', '--no-compile',
                     '--find-links', str(root / 'python-wheels'), '--find-links', str(root / 'wheels'),

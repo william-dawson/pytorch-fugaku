@@ -18,7 +18,9 @@ if "fjlapackexsve" not in cache.get("BLAS_LIBRARIES", ""):
 if cache.get("FUGAKU_LAPACK_LINKS") not in ("ON", "TRUE", "1"):
     raise SystemExit("Fujitsu LAPACK link validation failed")
 commands = json.loads((root / "build-pytorch/compile_commands.json").read_text())
-functionalization = [x for x in commands if "/RegisterFunctionalization_" in x["file"]]
+if any("-DUSE_MIMALLOC" in x["command"] for x in commands):
+    raise SystemExit("Embedded mimalloc remains enabled despite system allocator request")
+functionalization = [x for x in commands if "/build-pytorch/" in x["file"] and Path(x["file"]).name.startswith("Register")]
 if not functionalization or any("-Wno-error=missing-prototypes" not in x["command"] for x in functionalization):
     raise SystemExit("Generated functionalization files lack the intended warning exemption")
 mpi = [x for x in commands if x["file"].endswith("/ProcessGroupMPI.cpp")]
@@ -31,6 +33,8 @@ if sys.argv[-1] == "artifacts":
         if "AArch64" not in header:
             raise SystemExit(f"Wrong architecture: {path}")
         dynamic = subprocess.check_output(["readelf", "-d", str(path)], text=True)
+        if "[libmpg.so" not in dynamic:
+            raise SystemExit(f"Missing large-page dependency: {path}")
         if name == "libtorch_cpu.so" and "[libfjlapackexsve.so" not in dynamic:
             raise SystemExit("libtorch_cpu does not retain its Fujitsu BLAS dependency")
         if any(f"[{lib}" in dynamic for lib in ("libomp.so", "libgomp.so", "libiomp")):

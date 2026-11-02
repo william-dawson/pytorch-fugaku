@@ -33,7 +33,8 @@ for path in list(root.glob('*.sh')):
     subprocess.run(['bash', '-n', str(path)], check=True)
 for path in root.glob('*.py'):
     ast.parse(path.read_text())
-patches = sorted(root.glob('*.patch'))
+patches = [root / name for name in ('aten-sleef.patch', 'generated-paths.patch', 'semaphore-version.patch', 'atomic-value-type.patch', 'filesystem-link.patch', 'system-allocator.patch', 'functionalization-warning.patch', 'registration-warning.patch')]
+assert set(patches) == set(root.glob('*.patch'))
 targets = set()
 for patch in patches:
     for name in re.findall(r'^\+\+\+ b/(.+)$', patch.read_text(), re.MULTILINE):

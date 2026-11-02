@@ -25,6 +25,9 @@ CPython **3.11.5 AArch64**. Sources and wheel checksums are pinned in
 - For what has actually passed, including limits, use [references/results.md](references/results.md)
   and its small machine-readable evidence files. Historical PASS records are not fresh validation.
 
+Read [references/large-pages.md](references/large-pages.md) for the required
+system allocator, linked Python runner, library-path isolation and current H2H results.
+
 ## Operational invariants
 
 1. Cross-compile on an **x86 login node**. Run AArch64 artifacts and the target
@@ -44,12 +47,13 @@ CPython **3.11.5 AArch64**. Sources and wheel checksums are pinned in
 
 ## Supplied material
 
-`assets/recipe/` preserves the tested build scripts, CMake files, five patches,
+`assets/recipe/` preserves the tested build scripts, CMake files, eight patches,
 Python wheel assembler and runtime tests. These files contain historical paths;
 **stage them with `scripts/prepare.py` rather than executing them in this skill directory**.
 The preparer substitutes explicit site paths, supplies guarded launchers and
-isolates the Python 3.11 host generator environment. Those staging adaptations
-have local validation; they are not a claim of a second complete Fugaku rebuild.
+isolates the Python 3.11 host generator environment. The November 2026 fresh rebuild passed core and Python compute-node validation.
+See [references/large-pages.md](references/large-pages.md) for the exact evidence
+and the distinction between tested commands and updated staging wrappers.
 Run `scripts/validate-stage.py PREPARED_WORKSPACE` before transfer/build for
 checksum, source-patch round-trip, syntax and target NumPy architecture checks.
 `scripts/test-record-validation.py` exercises incomplete-output rejection.

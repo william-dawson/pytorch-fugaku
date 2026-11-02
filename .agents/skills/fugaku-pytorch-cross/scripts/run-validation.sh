@@ -6,6 +6,7 @@ mode=${1:?}
 ranks=${2:?}
 case "$mode" in
   libtorch) [[ "$ranks" == 2 ]]; bash ./run-smoke.sh ;;
-  smoke|async|benchmark) bash ./run-python.sh "$mode" "$ranks" ;;
+  allocator) unset LD_PRELOAD LD_LIBRARY_PATH PYTHONHOME PYTHONPATH; ./bin/python3.11-fugaku ./allocator-probe.py ;;
+  smoke|async|benchmark|largepage) bash ./run-python.sh "$mode" "$ranks" ;;
   *) exit 2 ;;
 esac

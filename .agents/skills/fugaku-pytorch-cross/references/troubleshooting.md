@@ -1,5 +1,9 @@
 # Failure signatures and demonstrated fixes
 
+**November 2026 update:** see [large-pages.md](large-pages.md) for the fresh
+allocator rebuild, linked runner, current validation and performance limitations.
+Earlier benchmark records below describe the previous allocator build.
+
 Use these diagnoses when the signature matches. Preserve the log and inspect
 the actual command before changing flags. Do not globally disable warnings or
 pretend configure probes succeeded.

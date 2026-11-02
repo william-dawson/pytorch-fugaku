@@ -166,11 +166,22 @@ LibTorch and its MPI backend. After validating the core on compute nodes, it
 builds the Python bindings against AArch64 Python headers and packages the
 wheel. The resulting wheel has passed two-node tests for matrix multiplication,
 LAPACK, autograd, NumPy interoperability, OpenMP and blocking/asynchronous MPI
-operations. Initial one-node GEMM measurements cover 1, 2 and 4 MPI ranks.
+operations. Historical one-node GEMM measurements cover 1, 2 and 4 MPI ranks; those
+benchmarks have not yet been repeated for the allocator rebuild.
+
+The fresh source build explicitly disables PyTorch’s AArch64 mimalloc override,
+links Fugaku’s large-page library, and supplies a linked non-PIE Python runner.
+Two-node tests verified actual 2 MiB tensor pages and seven asynchronous MPI
+cases, with application `LD_PRELOAD` and `LD_LIBRARY_PATH` cleared. See the
+[large-page build and validation notes](.agents/skills/fugaku-pytorch-cross/references/large-pages.md).
 
 **The head-to-head (H2H) comparison with the existing container/`torch_fugaku`
 approach is still in progress.** These functional tests and GEMM measurements
 do not establish end-to-end training performance or a preferred route. The
+first instrumented 151M-model comparison reached 43.0 tokens/s for the fresh
+cross-build versus 439.9 for the container (two nodes, 4 ranks × 12 threads per
+node); the old cross-build was variable and this is not an established rebuild
+speedup. Plain and reversed-order comparisons remain under review. The
 model-training results elsewhere in this README describe the container approach;
 they are not results for the new cross-compiled wheel.
 

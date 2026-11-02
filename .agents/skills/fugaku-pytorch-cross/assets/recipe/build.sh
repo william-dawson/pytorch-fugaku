@@ -7,6 +7,7 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 export MAX_JOBS=${MAX_JOBS:-8}
 [[ "$MAX_JOBS" =~ ^[1-8]$ ]] || { echo 'MAX_JOBS must be 1..8'; exit 2; }
+export PYTORCH_BUILD_NUMBER=1
 export PYTHONNOUSERSITE=1 PYTORCH_BUILD_VERSION=2.11.0+fugaku.llvm
 export PYTORCH_BLAS_F2C=OFF PYTORCH_BLAS_USE_CBLAS_DOT=OFF
 unset CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CMAKE_TOOLCHAIN_FILE LD_PRELOAD
@@ -25,6 +26,12 @@ mkdir -p omp-include target
 ln -sfn /opt/FJSVxtclanga/tcsds-1.2.43/include/omp.h omp-include/omp.h
 src="$root/src/pytorch"
 [[ -f "$src/third_party/eigen/Eigen/Core" ]] || { echo 'Missing Eigen'; exit 2; }
+# Undo overlapping supplemental warning patches before checking the base patch.
+for warning_patch in registration-warning.patch functionalization-warning.patch; do
+  if git -C "$src" apply --reverse --check "$root/$warning_patch" 2>/dev/null; then
+    git -C "$src" apply --reverse "$root/$warning_patch"
+  fi
+done
 # Apply the reference recipe's static-SLEEF import/include fix idempotently.
 if git -C "$src" apply --check "$root/aten-sleef.patch"; then
   git -C "$src" apply "$root/aten-sleef.patch"
@@ -57,6 +64,27 @@ if git -C "$src" apply --reverse --check "$root/filesystem-link.patch" 2>/dev/nu
 else
   git -C "$src" apply --check "$root/filesystem-link.patch"
   git -C "$src" apply "$root/filesystem-link.patch"
+fi
+
+if git -C "$src" apply --reverse --check "$root/system-allocator.patch" 2>/dev/null; then
+  :
+else
+  git -C "$src" apply --check "$root/system-allocator.patch"
+  git -C "$src" apply "$root/system-allocator.patch"
+fi
+
+if git -C "$src" apply --reverse --check "$root/functionalization-warning.patch" 2>/dev/null; then
+  :
+else
+  git -C "$src" apply --check "$root/functionalization-warning.patch"
+  git -C "$src" apply "$root/functionalization-warning.patch"
+fi
+
+if git -C "$src" apply --reverse --check "$root/registration-warning.patch" 2>/dev/null; then
+  :
+else
+  git -C "$src" apply --check "$root/registration-warning.patch"
+  git -C "$src" apply "$root/registration-warning.patch"
 fi
 
 printf 'host-protoc\n' > status.txt
@@ -94,7 +122,7 @@ cmake -S "$src" -B build-pytorch -G Ninja --toolchain "$root/fugaku-llvm.cmake" 
   -DPROTOBUF_PROTOC_EXECUTABLE="$root/host-tools/bin/protoc" -Dprotobuf_BUILD_PROTOC_BINARIES=OFF \
   -DBUILD_PYTHON=OFF -DBUILD_TEST=OFF -DBUILD_TESTING=OFF -DBUILD_BINARY=OFF \
   -DUSE_DISTRIBUTED=ON -DUSE_MPI=ON -DUSE_C10D_MPI=ON -DUSE_GLOO=OFF -DUSE_TENSORPIPE=OFF \
-  -DUSE_OPENMP=ON -DBLAS=Generic "-DBLAS_LIBRARIES=$blas" \
+  -DFUGAKU_USE_SYSTEM_ALLOCATOR=ON -DUSE_MIMALLOC=OFF -DUSE_OPENMP=ON -DBLAS=Generic "-DBLAS_LIBRARIES=$blas" \
   -DUSE_SYSTEM_SLEEF=ON -DSLEEF_LIBRARY="$root/target/lib/libsleef.a" -DSLEEF_INCLUDE="$root/target/include" \
   -DUSE_CUDA=OFF -DUSE_ROCM=OFF -DUSE_XPU=OFF -DUSE_MPS=OFF -DUSE_MAGMA=OFF \
   -DUSE_MKLDNN=OFF -DUSE_FBGEMM=OFF -DUSE_KLEIDIAI=OFF -DUSE_XNNPACK=OFF \

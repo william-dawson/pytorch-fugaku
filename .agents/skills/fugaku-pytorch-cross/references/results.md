@@ -1,5 +1,9 @@
 # Recorded baseline: 2026-10-30/31 (Asia/Tokyo)
 
+**November 2026 update:** see [large-pages.md](large-pages.md) for the fresh
+allocator rebuild, linked runner, current validation and performance limitations.
+Earlier benchmark records below describe the previous allocator build.
+
 These are historical results from the successful staged build, not a substitute
 for validation of a fresh reproduction. The tested remote workspace was
 `/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross`.

@@ -12,9 +12,9 @@ unset CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LD_PRELOAD PYTHONPATH
 printf 'host-python-311\n' > python-status.txt
 host=/vol0402/data/ra000009/u10035/fminiconda3/envs/front/bin/python3.11
 target=/vol0402/data/ra000009/u10035/miniconda3
-"$host" -c 'import platform,sys; assert platform.machine()=="x86_64"; assert sys.version_info[:2]==(3,11); import yaml; print(sys.version)'
-[[ -x host-venv311/bin/python ]] || "$host" -m venv --system-site-packages host-venv311
-host-venv311/bin/python -m pip install --no-index --find-links wheels --no-deps typing-extensions==4.15.0 packaging==25.0 setuptools==80.9.0 wheel==0.45.1
+"$host" -c 'import platform,sys; assert platform.machine()=="x86_64"; assert sys.version_info[:2]==(3,11); print(sys.version)'
+[[ -x host-venv311/bin/python ]] || "$host" -m venv host-venv311
+host-venv311/bin/python -m pip install --no-index --find-links wheels --find-links host311-wheels --no-deps PyYAML==6.0.2 numpy==2.2.6 typing-extensions==4.15.0 packaging==25.0 setuptools==80.9.0 wheel==0.45.1
 module load LLVM/llvmorg-22.1.0
 export PATH="$root/host-venv/bin:$PATH"
 export LD=/opt/FJSVxos/devkit/aarch64/bin/aarch64-linux-gnu-ld
@@ -29,7 +29,7 @@ cmake -S src/pytorch -B build-python -G Ninja --toolchain "$root/fugaku-llvm.cma
   -DCMAKE_INSTALL_PREFIX="$root/python-prefix" -DCMAKE_INSTALL_RPATH='$ORIGIN' \
   "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,/opt/FJSVxtclanga/tcsds-1.2.43/lib64 -Wl,-rpath-link,$root/target/lib -Wl,-rpath-link,/opt/FJSVxtclanga/tcsds-1.2.43/lib64" \
   -DCMAKE_PREFIX_PATH="$root/target" -DCMAKE_MODULE_PATH="$root/cmake" \
-  -DBUILD_LIBTORCHLESS=ON -DBUILD_PYTHON=ON -DBUILD_TEST=OFF -DBUILD_TESTING=OFF -DBUILD_BINARY=OFF \
+  -DFUGAKU_USE_SYSTEM_ALLOCATOR=ON -DUSE_MIMALLOC=OFF -DBUILD_LIBTORCHLESS=ON -DBUILD_PYTHON=ON -DBUILD_TEST=OFF -DBUILD_TESTING=OFF -DBUILD_BINARY=OFF \
   -DUSE_NUMPY=ON "-DPython_NumPy_INCLUDE_DIR=$root/runtime-site/numpy/_core/include" \
   -DUSE_DISTRIBUTED=ON -DUSE_MPI=ON -DUSE_C10D_MPI=ON \
   -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE="$root/host-tools/bin/protoc" \
