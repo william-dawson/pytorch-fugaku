@@ -41,6 +41,11 @@ if os.environ['H2H_VARIANT'] == 'llvm':
 
 import torch
 import torch.distributed as dist
+# H2H_FASTDROP=<libfastdrop.so>: replace CPU bernoulli_(p) (dropout masks) with the counter-based
+# kernel in h2h-fastdrop; stock PyTorch's was 71% of a GPT-125M step on A64FX.
+fastdrop = os.environ.get('H2H_FASTDROP')
+if fastdrop:
+    torch.ops.load_library(fastdrop)
 if os.environ['H2H_VARIANT'] == 'llvm':
     assert Path(torch.__file__).resolve().is_relative_to((fresh/'wheel-install').resolve())
 
@@ -49,7 +54,7 @@ mode = os.environ['H2H_MODE']
 backend = os.environ.get('H2H_BACKEND', 'fjmpi_port') if variant == 'llvm' else 'fjmpi'
 assert backend in ('fjmpi', 'fjmpi_port', 'fjmpi_async'), backend
 assert torch.__version__ == ('2.11.0+fugaku.llvm' if variant == 'llvm' else '2.11.0+cu130')
-assert torch.get_num_threads() == per_rank
+assert torch.get_num_threads() == int(os.environ.get('OMP_NUM_THREADS', per_rank))
 if variant == 'container':
     import torch_fugaku
     torch_fugaku.register_backend()
@@ -229,7 +234,7 @@ try:
     audit('before')
     runpy.run_path(str(Path(__file__).with_name('llama_train.py')), run_name='__main__',
         init_globals={'h2h_record_step':record_step, 'h2h_record_input':record_input, 'h2h_record_initial':record_initial, 'h2h_step_start':step_start})
-    (output/f'timing.rank{rank}.json').write_text(json.dumps(dict(variant=variant,backend=backend,world=world,mode=mode,rank=rank,
+    (output/f'timing.rank{rank}.json').write_text(json.dumps(dict(variant=variant,backend=backend,world=world,mode=mode,rank=rank,fastdrop=fastdrop,
         steps=steps,phases=phases,input_hashes=input_hashes,window_wall_s=window_end-window_start,peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         elapsed_before_final_audit_s=time.perf_counter()-started),indent=2))
     audit('after')

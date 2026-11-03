@@ -37,6 +37,8 @@ The directory is expected at `$WORK/h2h-scale` (`rank.sh` binds `$WORK` into the
 - Layout and workload (`rank.sh`/`run.sh`): `H2H_RPN` ranks per node (threads = 48 / RPN; the container
   gets `PF_FJBLAS=1` only at 4), `H2H_SEQ` (default 128), `H2H_MB` micro-batch (default 1),
   `H2H_ZERO` stage (default 3; 0 for plain data parallel). Set `#PJM --mpi max-proc-per-node` to match.
+  `H2H_DROPOUT` (gpt-* models), `H2H_THREADS`, `H2H_WAIT_POLICY` (diagnostics), and
+  `H2H_FASTDROP=<libfastdrop.so>` (load the fast dropout kernel, LLVM only; see ../fastdrop).
 - `llama_train.py`: Llama-architecture DeepSpeed ZeRO-3 trainer on synthetic tokens (models `llama-125m`, `1b`, ...).
 - `summarize.py`: steady step time, losses and blocked time per case. Edit its job list.
 - `compare_profiles.py`: self-CPU per operator, container vs LLVM, from two `profile.rank<N>.txt`.

@@ -1,0 +1,204 @@
+{
+ "date": "2026-11-03",
+ "description": "Head-to-heads summarized in references/comparisons.md. FP32, freq=2000 eco_state=0, LLVM cases use mimalloc (LD_PRELOAD) and fjmpi_port; legacy-sif = Fugaku-LLM Megatron-DeepSpeed in DeepSpeedFugaku.sif.",
+ "runs": [
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "new-sif",
+   "model": "llama-1b seq2048",
+   "nodes": 4,
+   "layout": "2x24 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": 25.58,
+   "tokens_per_s_per_node": 160,
+   "job": "53480021"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 4,
+   "layout": "2x24 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53480050 (wide-rank failure)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "new-sif",
+   "model": "llama-1b seq2048",
+   "nodes": 16,
+   "layout": "4x12 ZeRO-3 PF_FJBLAS",
+   "dropout": null,
+   "steady_step_s": 40.11,
+   "tokens_per_s_per_node": 204,
+   "job": "53480066"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 16,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": 36.46,
+   "tokens_per_s_per_node": 225,
+   "job": "53480083"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "new-sif",
+   "model": "llama-1b seq2048",
+   "nodes": 32,
+   "layout": "2x24 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": 26.85,
+   "tokens_per_s_per_node": 153,
+   "job": "53480097"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 32,
+   "layout": "2x24 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53480114 (wide-rank failure)"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "legacy-sif",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 DP mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 14.5,
+   "tokens_per_s_per_node": 1130,
+   "job": "53487626"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "legacy-sif",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 DP mbs4",
+   "dropout": 0.0,
+   "steady_step_s": 12.0,
+   "tokens_per_s_per_node": 1365,
+   "job": "53492129"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "new-sif",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 38.7,
+   "tokens_per_s_per_node": 423,
+   "job": "53487642"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 32.07,
+   "tokens_per_s_per_node": 511,
+   "job": "53487645"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm+fastdrop",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 9.54,
+   "tokens_per_s_per_node": 1717,
+   "job": "53493468"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.0,
+   "steady_step_s": 8.07,
+   "tokens_per_s_per_node": 2030,
+   "job": "53488227"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "legacy-sif",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "TP4, 1x48 per node",
+   "dropout": 0.1,
+   "steady_step_s": 3.68,
+   "tokens_per_s_per_node": 70,
+   "job": "53492139"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "legacy-sif",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "TP4, 1x48 per node",
+   "dropout": 0.0,
+   "steady_step_s": 3.52,
+   "tokens_per_s_per_node": 73,
+   "job": "53492149"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "new-sif",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.1,
+   "steady_step_s": 48.7,
+   "tokens_per_s_per_node": 84,
+   "job": "53492186"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.1,
+   "steady_step_s": 40.2,
+   "tokens_per_s_per_node": 102,
+   "job": "53492160"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm+fastdrop",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.1,
+   "steady_step_s": 23.4,
+   "tokens_per_s_per_node": 175,
+   "job": "53493472"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.0,
+   "steady_step_s": 21.3,
+   "tokens_per_s_per_node": 193,
+   "job": "53492175"
+  }
+ ]
+}

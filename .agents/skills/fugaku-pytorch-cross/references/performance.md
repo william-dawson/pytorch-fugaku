@@ -160,6 +160,39 @@ This complements `system-allocator.patch`, which keeps mimalloc out of `libc10` 
 2.11 forces it on Linux/AArch64). The preload replaces the process allocator at run time and
 needs no rebuild.
 
+## Fix 4 (models with dropout): fast CPU `bernoulli_`
+
+**Symptom.** GPT-style models train 2-4× slower than expected: GPT-125M ran at 32.1 s/step, but
+8.07 s/step with dropout off (jobs 53487645 / 53488227).
+
+**Diagnosis.** In a torch.profiler step, `aten::bernoulli_` (dropout's mask) took 22.8 s of 32.1 s
+(71%). Stock PyTorch's CPU `bernoulli_` draws random numbers one element at a time. Fujitsu's
+PyTorch 1.13 fork needs 0.69 s for the same 73 calls. See [comparisons.md](comparisons.md).
+
+**Fix.** `assets/fastdrop/libfastdrop.so` replaces `aten::bernoulli_.float` on CPU at load time
+(`torch.ops.load_library`; in the harness, `H2H_FASTDROP=<path>`).
+- **Generator.** Element i of a call gets a keyed integer hash of i, so the loop has no carried
+  state and vectorizes and parallelizes.
+- **Seeding.** The key is one 64-bit draw from torch's generator per call, so `torch.manual_seed`
+  still makes runs reproducible.
+- **Types.** float32 directly; other float types through a float32 temporary.
+- **Unit test** (`test_fastdrop.py`, job 53493367, 12 threads, 12.6M elements):
+  `bernoulli_` 210.6 → 1.85 ms (114×), `F.dropout` 216.4 → 7.6 ms (28×). Means at p = 0-1 are
+  within 6σ, the stream is reproducible under `manual_seed`, consecutive calls differ in 50% of
+  elements, lag-1 correlation is 0.0002, and float64, bfloat16 and non-contiguous tensors pass.
+- **Training:** GPT-125M 32.1 → 9.54 s/step (53493468); GPT-1.3B 4 × 12 ZeRO-3 40.2 → 23.4 s/step
+  (53493472).
+
+The random stream differs from stock PyTorch's, so losses are not bit-identical to the container,
+but they fall normally. Llama has no dropout and is unaffected.
+
+## Layout: 4 ranks × 12 threads only
+
+The LLVM build is about 40× slower with fewer than 4 ranks per node (2 × 24, 1 × 48): collectives
+spin for about 1.4 s each. Six variations (allocator, staging, thread count, wait policy) did not
+fix it; see [comparisons.md](comparisons.md). Use one rank per CMG. Where 4 × 12 runs out of
+memory (benchkit Llama-1B at 4 and 32 nodes), the LLVM build has no working layout yet.
+
 ## Dead ends (do not repeat)
 
 | Tried | Outcome | Job |
@@ -195,6 +228,7 @@ which VmRSS does not count. See large-pages.md.
 ## Open items
 
 - 8+ node 1B, longer runs, and mimalloc at 125M (not needed there, not yet shown harmless).
+- Why wide ranks (2 × 24, 1 × 48) make every collective cost about 1.4 s.
 - The mechanism of ProcessGroupMPI's stalls (fix 2 avoids it rather than explaining it).
 - Communication is still exposed: 30% of a 125M step and about half of a 1B step is spent blocked
   in allgather and reduce-scatter. See [overlap.md](overlap.md).

@@ -39,7 +39,9 @@ From the November 2026 training work; details and evidence in [performance.md](p
 | Step times jitter 2x; involuntary context switches concentrate on one rank per node | Something runs inside that rank's CPU set (in our case a memory sampler) and preempts spinning OpenMP threads. Remove it. |
 | `/dev/shm` staging: `Permission denied`, exit 126 | `/dev/shm` is noexec on compute nodes. |
 | `module: command not found` when building over ssh | Non-login shell. `bash -lc 'bash build.sh'`. |
-| LLVM build 40x slower at 2 ranks x 24 threads, sequence 2048 (step 0 > 1000 s); fine at 4 x 12 and at 2 x 24 with sequence 512 | Open; see [comparisons.md](comparisons.md). Use 4 ranks x 12 threads. |
+| LLVM build ~40x slower with fewer than 4 ranks per node (2 x 24, 1 x 48); every collective ~1.4 s | Open; six fixes failed (comparisons.md). Use 4 ranks x 12 threads. |
+| GPT-style training 2-4x slow; `aten::bernoulli_` dominates the profile | Stock CPU dropout masks are scalar. Load `assets/fastdrop` (`H2H_FASTDROP`). |
+| Plain data-parallel GPT-1.3B killed (out of memory) at 1 rank x 48, any stack | Does not fit a 32 GB node without Fugaku-LLM's old tcmalloc; use ZeRO-3 at 4 x 12 (or legacy tensor-parallel 4). |
 | `lstat /share/...: no such file or directory` in a job | `/share` is not mounted on compute nodes; copy the file to a data volume. |
 | Legacy SIF: `No module named 'torch'` | Use `singularity run` (the runscript activates the venv), not `exec`. |
 | Legacy SIF: `libfjlapackexsve.so.1: cannot open shared object file` | Bind the host's `/opt/FJSVxtclanga` (the image expects tcsds-1.2.36) plus pf-run's interconnect binds. |

@@ -32,6 +32,8 @@ if [[ "$case" == *+* ]]; then
     # mi*: mimalloc preloaded into the python process only (h2h-alloc); a preloaded malloc wins
     # over libmpg's, and covers posix_memalign (torch's tensors). keep: never return memory.
     mi) export H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 ;;
+    # mi-nodecommit: mimalloc purges by resetting pages instead of decommitting them.
+    mi-nodecommit) export H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 MIMALLOC_PURGE_DECOMMITS=0 ;;
     mi-nohp) export XOS_MMM_L_HPAGE_TYPE=none H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 ;;
     mi-nohp-keep) export XOS_MMM_L_HPAGE_TYPE=none H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 MIMALLOC_PURGE_DELAY=-1 ;;
     mi-keep) export H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 MIMALLOC_PURGE_DELAY=-1 ;;
@@ -47,7 +49,8 @@ fi
 unset LD_PRELOAD PYTHONHOME LD_LIBRARY_PATH PYTHONPATH
 export PYTHONNOUSERSITE=1 DS_ACCELERATOR=cpu
 rpn=${H2H_RPN:-4}
-export OMP_NUM_THREADS=$((48 / rpn)) OMP_DYNAMIC=FALSE OMP_PROC_BIND=false OMP_WAIT_POLICY=ACTIVE OPENBLAS_NUM_THREADS=1
+# H2H_THREADS: fewer OpenMP threads than the rank's cores (e.g. to leave cores for MPI helpers).
+export OMP_NUM_THREADS=${H2H_THREADS:-$((48 / rpn))} OMP_DYNAMIC=FALSE OMP_PROC_BIND=false OMP_WAIT_POLICY=${H2H_WAIT_POLICY:-ACTIVE} OPENBLAS_NUM_THREADS=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false MEMLOG=1 NNODES=${PJM_NODE:?}
 rank=${PMIX_RANK:?}
 out=${H2H_OUTPUT:?}
@@ -66,6 +69,8 @@ fi
 trap 'code=$?; [[ -n "$sampler" ]] && kill "$sampler" 2>/dev/null; printf "%s\n" "$code" > "$out/rank'"$rank"'.exit.txt"' EXIT
 args=(--model "${H2H_MODEL:?}" --seq "${H2H_SEQ:-128}" --micro-batch "${H2H_MB:-1}" --dtype fp32 --zero "${H2H_ZERO:-3}" --steps "${H2H_STEPS:?}"
   --warmup "${H2H_WARMUP:?}" --attn sdpa_causal --checkpointing --low-mem)
+# gpt-* models only: llama_train's --dropout (transformers' default 0.1, as Megatron).
+[[ -n "${H2H_DROPOUT:-}" ]] && args+=(--dropout "$H2H_DROPOUT")
 if [[ "$case" == container ]]; then
   # Fujitsu BLAS only at one rank per CMG, as benchkit PR 343 (wider ranks: README deadlock warning).
   export H2H_VARIANT=container PF_BIND="$root:/cross:rw" PYTHONPATH=/cross/h2h-paired/site310
@@ -75,7 +80,7 @@ if [[ "$case" == container ]]; then
     "${args[@]}" --backend fjmpi > "$out/rank$rank.log" 2>&1
   exit
 fi
-export H2H_VARIANT=llvm RANK=$rank LOCAL_RANK=$((rank % rpn)) LOCAL_SIZE=$rpn USE_LIBUV=0 TORCH_FUGAKU_STAGE_MB=8
+export H2H_VARIANT=llvm RANK=$rank LOCAL_RANK=$((rank % rpn)) LOCAL_SIZE=$rpn USE_LIBUV=0 TORCH_FUGAKU_STAGE_MB=${TORCH_FUGAKU_STAGE_MB:-8}
 case "$case" in
   llvm-port) export H2H_BACKEND=fjmpi_port ;;
   llvm-sync) export H2H_BACKEND=fjmpi_async TORCH_FUGAKU_ASYNC=0 ;;

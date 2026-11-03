@@ -38,7 +38,9 @@ The page also lists every dead end and the measurement pitfalls. Harness and bac
 collectives, the experimental `fjmpi_async`) is in [references/overlap.md](references/overlap.md).
 Benchmarks against the containers: benchkit PR 343 and the legacy Fugaku-LLM Megatron SIF
 (how to run it, which sizes are comparable), in [references/comparisons.md](references/comparisons.md).
-Note the LLVM build is currently ~40x slow at 2 ranks x 24 threads with sequence 2048.
+**Run the LLVM build at 4 ranks x 12 threads per node only** (it is ~40x slow with wider ranks).
+For models with dropout, load `assets/fastdrop` (stock CPU `bernoulli_` was 71% of a GPT step).
+With both, it beats the legacy SIF (1.5x at GPT-125M, 2.5x at 1.3B) and the new SIF (10-25%).
 
 ## Operational invariants
 
