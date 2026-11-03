@@ -20,12 +20,14 @@ import time
 
 started = time.perf_counter()
 rank = int(os.environ['PMIX_RANK'])
-local_rank = int(os.environ.get('OMPI_COMM_WORLD_LOCAL_RANK', rank % 4))
+local_rank = int(os.environ.get('OMPI_COMM_WORLD_LOCAL_RANK', rank % int(os.environ.get('H2H_RPN', '4'))))
 initial_affinity = sorted(os.sched_getaffinity(0))
-assert len(initial_affinity) in (12, 48), initial_affinity
+rpn = int(os.environ.get('H2H_RPN', '4'))
+per_rank = 48 // rpn
+assert len(initial_affinity) in (per_rank, 48), initial_affinity
 if len(initial_affinity) == 48:
-    os.sched_setaffinity(0, initial_affinity[local_rank*12:(local_rank+1)*12])
-assert len(os.sched_getaffinity(0)) == 12
+    os.sched_setaffinity(0, initial_affinity[local_rank*per_rank:(local_rank+1)*per_rank])
+assert len(os.sched_getaffinity(0)) == per_rank
 
 if os.environ['H2H_VARIANT'] == 'llvm':
     fresh = Path('/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross-largepage/rebuild-largepage')
@@ -47,7 +49,7 @@ mode = os.environ['H2H_MODE']
 backend = os.environ.get('H2H_BACKEND', 'fjmpi_port') if variant == 'llvm' else 'fjmpi'
 assert backend in ('fjmpi', 'fjmpi_port', 'fjmpi_async'), backend
 assert torch.__version__ == ('2.11.0+fugaku.llvm' if variant == 'llvm' else '2.11.0+cu130')
-assert torch.get_num_threads() == 12
+assert torch.get_num_threads() == per_rank
 if variant == 'container':
     import torch_fugaku
     torch_fugaku.register_backend()
@@ -64,7 +66,7 @@ elif backend == 'fjmpi_async':
 world = int(os.environ['WORLD_SIZE'])
 dist.init_process_group(backend)
 assert dist.get_rank() == rank and dist.get_world_size() == world
-os.environ.update(RANK=str(rank), WORLD_SIZE=str(world), LOCAL_RANK=str(local_rank), LOCAL_SIZE='4')
+os.environ.update(RANK=str(rank), WORLD_SIZE=str(world), LOCAL_RANK=str(local_rank), LOCAL_SIZE=str(rpn))
 warmup = int(os.environ['H2H_WARMUP'])
 def step_range(name):
     v = os.environ.get(name)

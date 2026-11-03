@@ -46,7 +46,8 @@ if [[ "$case" == *@* ]]; then
 fi
 unset LD_PRELOAD PYTHONHOME LD_LIBRARY_PATH PYTHONPATH
 export PYTHONNOUSERSITE=1 DS_ACCELERATOR=cpu
-export OMP_NUM_THREADS=12 OMP_DYNAMIC=FALSE OMP_PROC_BIND=false OMP_WAIT_POLICY=ACTIVE OPENBLAS_NUM_THREADS=1
+rpn=${H2H_RPN:-4}
+export OMP_NUM_THREADS=$((48 / rpn)) OMP_DYNAMIC=FALSE OMP_PROC_BIND=false OMP_WAIT_POLICY=ACTIVE OPENBLAS_NUM_THREADS=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false MEMLOG=1 NNODES=${PJM_NODE:?}
 rank=${PMIX_RANK:?}
 out=${H2H_OUTPUT:?}
@@ -54,25 +55,27 @@ out=${H2H_OUTPUT:?}
 # process's RSS, every 2 s, so a case killed for memory still shows who grew and when. Opt-in:
 # it runs inside that rank's CPU set and its preemptions stalled every collective (job 53475550).
 sampler=
-if [[ "${H2H_MEMSAMPLE:-0}" == 1 ]] && (( rank % 4 == 0 )); then
+if [[ "${H2H_MEMSAMPLE:-0}" == 1 ]] && (( rank % rpn == 0 )); then
   (while :; do
      printf '%s avail_kb=%s' "$(date +%s.%N)" "$(awk '/MemAvailable/ {print $2}' /proc/meminfo)"
      ps -u "$(id -u)" -o rss=,comm= | awk '$2 ~ /python/ {printf " %s", $1} END {print ""}'
      sleep 2
-   done) > "$out/mem.node$((rank / 4)).txt" 2>/dev/null &
+   done) > "$out/mem.node$((rank / rpn)).txt" 2>/dev/null &
   sampler=$!
 fi
 trap 'code=$?; [[ -n "$sampler" ]] && kill "$sampler" 2>/dev/null; printf "%s\n" "$code" > "$out/rank'"$rank"'.exit.txt"' EXIT
-args=(--model "${H2H_MODEL:?}" --seq 128 --micro-batch 1 --dtype fp32 --zero 3 --steps "${H2H_STEPS:?}"
+args=(--model "${H2H_MODEL:?}" --seq "${H2H_SEQ:-128}" --micro-batch "${H2H_MB:-1}" --dtype fp32 --zero "${H2H_ZERO:-3}" --steps "${H2H_STEPS:?}"
   --warmup "${H2H_WARMUP:?}" --attn sdpa_causal --checkpointing --low-mem)
 if [[ "$case" == container ]]; then
-  export H2H_VARIANT=container PF_FJBLAS=1 PF_BIND="$root:/cross:rw" PYTHONPATH=/cross/h2h-paired/site310
+  # Fujitsu BLAS only at one rank per CMG, as benchkit PR 343 (wider ranks: README deadlock warning).
+  export H2H_VARIANT=container PF_BIND="$root:/cross:rw" PYTHONPATH=/cross/h2h-paired/site310
+  if (( rpn == 4 )); then export PF_FJBLAS=1; fi
   export H2H_OUTPUT="/cross/h2h-scale/${H2H_OUTPUT_REL:?}"
   bash "$root/h2h-paired/pf/pf-run" "$root/pytorch-fugaku-b5879f2.sif" python -u /cross/h2h-scale/run.py \
     "${args[@]}" --backend fjmpi > "$out/rank$rank.log" 2>&1
   exit
 fi
-export H2H_VARIANT=llvm RANK=$rank LOCAL_RANK=$((rank % 4)) LOCAL_SIZE=4 USE_LIBUV=0 TORCH_FUGAKU_STAGE_MB=8
+export H2H_VARIANT=llvm RANK=$rank LOCAL_RANK=$((rank % rpn)) LOCAL_SIZE=$rpn USE_LIBUV=0 TORCH_FUGAKU_STAGE_MB=8
 case "$case" in
   llvm-port) export H2H_BACKEND=fjmpi_port ;;
   llvm-sync) export H2H_BACKEND=fjmpi_async TORCH_FUGAKU_ASYNC=0 ;;

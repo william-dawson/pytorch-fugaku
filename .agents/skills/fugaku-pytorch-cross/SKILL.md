@@ -36,6 +36,9 @@ against the wheel) instead of `mpi`, and mimalloc preloaded into the Python proc
 The page also lists every dead end and the measurement pitfalls. Harness and backends are in
 `assets/h2h/`, `assets/backends/`, `assets/alloc/`. Communication overlap (Fujitsu persistent
 collectives, the experimental `fjmpi_async`) is in [references/overlap.md](references/overlap.md).
+Benchmarks against the containers: benchkit PR 343 and the legacy Fugaku-LLM Megatron SIF
+(how to run it, which sizes are comparable), in [references/comparisons.md](references/comparisons.md).
+Note the LLVM build is currently ~40x slow at 2 ranks x 24 threads with sequence 2048.
 
 ## Operational invariants
 

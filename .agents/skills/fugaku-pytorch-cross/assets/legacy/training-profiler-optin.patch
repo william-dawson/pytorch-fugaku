@@ -1,0 +1,24 @@
+--- a/megatron/training.py
++++ b/megatron/training.py
+@@ -1321,15 +1321,19 @@
+             )
+         if args.use_timer:
+             timers('train_step').start()
++        # h2h: the bundle profiled and printed a 100-row table every step; opt-in via H2H_LEGACY_PROFILE=1.
++        import contextlib, os as _os
+         from torch.profiler import profile, ProfilerActivity
+-        with profile(activities=[ProfilerActivity.CPU]) as prof:
++        _prof_on = _os.environ.get('H2H_LEGACY_PROFILE') == '1'
++        with (profile(activities=[ProfilerActivity.CPU]) if _prof_on else contextlib.nullcontext()) as prof:
+             loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = train_step(
+                 forward_step_func, train_data_iterator, model, optimizer, lr_scheduler
+             )
+         if args.use_timer:
+             timers('train_step').stop()
+             timers('iteration').stop()
+-        print(prof.key_averages().table(sort_by='cpu_time_total', row_limit=100))
++        if _prof_on:
++            print(prof.key_averages().table(sort_by='cpu_time_total', row_limit=100))
+         if args.use_timer:
+             timers('iteration').start()
+         del prof

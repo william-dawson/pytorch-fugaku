@@ -8,7 +8,8 @@ suite="results.${PJM_JOBID}"
 mkdir -p "$suite"
 trap 'code=$?; printf "%s\n" "$code" > "$here/$suite/exit.txt"' EXIT
 export PF_HOSTLIB="$here/.pf-hostlib.${PJM_JOBID}"
-bash "$here/../h2h-paired/pf/pf-setup" 4
+# H2H_RPN ranks per node (default 4, one per CMG; benchkit also uses 2 x 24 threads).
+bash "$here/../h2h-paired/pf/pf-setup" "${H2H_RPN:-4}"
 set -a; source "$PF_HOSTLIB/pf.env"; set +a
 export H2H_MODE=resources
 { env | grep -E '^(PJM_LLIO_CN_CACHE_SIZE|PJM_NODE|WORLD_SIZE|H2H_)' | sort; } > "$suite/env.txt"

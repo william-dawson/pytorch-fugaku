@@ -34,6 +34,9 @@ The directory is expected at `$WORK/h2h-scale` (`rank.sh` binds `$WORK` into the
   - `H2H_TRACE_STEPS=a,b`: fjmpi_async event trace
   - `H2H_PEAK=1`: per-phase peak RSS (perturbs timing)
   - `H2H_MEMSAMPLE=1`: a per-node memory sampler, set in `rank.sh` (perturbs timing badly)
+- Layout and workload (`rank.sh`/`run.sh`): `H2H_RPN` ranks per node (threads = 48 / RPN; the container
+  gets `PF_FJBLAS=1` only at 4), `H2H_SEQ` (default 128), `H2H_MB` micro-batch (default 1),
+  `H2H_ZERO` stage (default 3; 0 for plain data parallel). Set `#PJM --mpi max-proc-per-node` to match.
 - `llama_train.py`: Llama-architecture DeepSpeed ZeRO-3 trainer on synthetic tokens (models `llama-125m`, `1b`, ...).
 - `summarize.py`: steady step time, losses and blocked time per case. Edit its job list.
 - `compare_profiles.py`: self-CPU per operator, container vs LLVM, from two `profile.rank<N>.txt`.
