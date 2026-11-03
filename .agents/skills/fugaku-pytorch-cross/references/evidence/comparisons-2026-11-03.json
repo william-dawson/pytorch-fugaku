@@ -199,6 +199,105 @@
    "steady_step_s": 21.3,
    "tokens_per_s_per_node": 193,
    "job": "53492175"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "new-sif",
+   "model": "llama-1b seq2048",
+   "nodes": 12,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": 36.1,
+   "tokens_per_s_per_node": 227,
+   "job": "53496354"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 12,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": 34.2,
+   "tokens_per_s_per_node": 239,
+   "job": "53495281"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 8,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53495276 (out of memory step 1)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 24,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53495290 (out of memory step 1)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53491461 (out of memory step 0)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "new-sif",
+   "model": "llama-1b seq2048",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53491470 (out of memory step 1)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 32,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53491466 (out of memory step 1)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 32,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53495293 (out of memory step 1 with common_tofu_max_fastmode_procs=16)"
+  },
+  {
+   "comparison": "benchkit-pr343",
+   "stack": "llvm",
+   "model": "llama-1b seq2048",
+   "nodes": 32,
+   "layout": "4x12 ZeRO-3",
+   "dropout": null,
+   "steady_step_s": null,
+   "tokens_per_s_per_node": null,
+   "job": "53495301 (out of memory step 1 with common_tofu_large_recv_buf_size=262144)"
   }
  ]
 }

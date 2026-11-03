@@ -40,7 +40,8 @@ Benchmarks against the containers: benchkit PR 343 and the legacy Fugaku-LLM Meg
 (how to run it, which sizes are comparable), in [references/comparisons.md](references/comparisons.md).
 **Run the LLVM build at 4 ranks x 12 threads per node only** (it is ~40x slow with wider ranks).
 For models with dropout, load `assets/fastdrop` (stock CPU `bernoulli_` was 71% of a GPT step).
-With both, it beats the legacy SIF (1.5x at GPT-125M, 2.5x at 1.3B) and the new SIF (10-25%).
+With both, it beats the legacy SIF (1.5x at GPT-125M, 2.5x at 1.3B) and the new SIF (5-25%;
+benchkit Llama-1B fits 4x12 only at 12 and 16 nodes, 239 and 225 tokens/s/node).
 
 ## Operational invariants
 

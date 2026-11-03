@@ -19,8 +19,9 @@ The legacy SIF cannot run the benchkit workload, and the benchkit comparison doe
   - **New SIF:** 10% faster on benchkit's 16-node row, and 20-25% faster on GPT-125M and 1.3B.
 - **The LLVM build is unusable with fewer than 4 ranks per node** (2 × 24, 1 × 48): about 40×
   slower, see below.
-- **Some benchkit rows have no LLVM entry.** The 4- and 32-node rows need wide ranks for memory on
-  both stacks: 4 × 12 runs out of memory there for both.
+- **Benchkit at 4 × 12 fits only at 12 and 16 nodes, on both stacks.** There LLVM leads by 5-10%:
+  239 and 225 tokens/s per node, against the PR's best of 206. The PR's 4- and 32-node rows need
+  wide ranks for memory, so the LLVM build has no entry for them.
 
 ## 1. Benchkit PR 343 (`deepspeed-llm`): new SIF vs LLVM build
 
@@ -42,15 +43,28 @@ Llama has no dropout, so fast dropout does not apply here.
 Our new-SIF runs reproduce the PR, so the harness is faithful. At 16 nodes the losses are
 identical (12.1675 at step 9).
 
-**4 × 12 on the other rows** (the PR's README: each rank pays about 5 GB for the 128k vocabulary,
-so 4 ranks per node fit only at 16 nodes):
+**4 × 12 across node counts.** The PR's README says each rank pays about 5 GB for the 128k
+vocabulary, so it found 4 ranks per node fit only at 16 nodes. Measured:
 
-| | 4 nodes | 32 nodes |
-|---|---|---|
-| New SIF | out of memory in step 1 (53491470) | out of memory, per the README |
-| LLVM | out of memory in step-0 backward (53491461) | out of memory in step 1 (53491466) |
+| Nodes | New SIF, 4 × 12 | LLVM, 4 × 12 | Jobs |
+|---:|---:|---:|---|
+| 4 | out of memory in step 1 | out of memory in step-0 backward | 53491470 / 53491461 |
+| 8 | — | out of memory in step 1 | 53495276 |
+| **12** | **227** (36.1 s/step) | **239 (+5%)** (34.2 s/step) | 53496354 / 53495281 |
+| 16 | 204 | 225 (+10%) | 53480066 / 53480083 |
+| 24 | — | out of memory (bus error) in step 1 | 53495290 |
+| 32 | out of memory, per the README | out of memory in step 1 | 53491466 |
 
-LLVM's lower RSS (mimalloc) does not change which layouts fit.
+Losses at 12 nodes are identical step by step (12.1695 at step 9).
+- **Below 12 nodes** each rank's share of the model state is too big.
+- **Above 16 nodes** Fujitsu MPI's per-peer memory grows with the rank count.
+- **Neither memory-saving MPI setting rescues 32 nodes:**
+  `OMPI_MCA_common_tofu_max_fastmode_procs=16` (53495293) and
+  `OMPI_MCA_common_tofu_large_recv_buf_size=262144` (53495301) both still ran out of memory in
+  step 1. These are the parameters of the MPI user's guide §6.10.
+
+**The best result on this benchmark is the LLVM build at 4 × 12 on 12 nodes: 239 tokens/s per
+node,** against the PR's best of 206.
 
 ### Wide ranks (2 × 24, 1 × 48) are broken on the LLVM build
 
