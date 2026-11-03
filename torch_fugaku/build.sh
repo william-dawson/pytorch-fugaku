@@ -15,6 +15,8 @@ TORCH_FLAGS=(-std=c++17 -shared -fPIC -D_GLIBCXX_USE_CXX11_ABI=$ABI -I"$TL/inclu
 g++ -O3 -fopenmp csrc/parbmm.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_parbmm.so"
 # tmm: X . W^T through a fast transpose and the plain GEMM; generic aarch64.
 g++ -O3 -fopenmp csrc/tmm.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_tmm.so"
+# bernoulli: dropout masks from a keyed counter hash; generic aarch64.
+g++ -O3 -fopenmp csrc/bernoulli.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_bernoulli.so"
 # fastmath: vector-length-agnostic SVE; loaded only on CPUs with SVE.
 g++ -O3 -fopenmp -march=armv8.2-a+sve -Icsrc csrc/fastmath.cpp "${TORCH_FLAGS[@]}" -o "$OUT/libtorch_fugaku_fastmath.so"
 gcc -O2 -shared -fPIC csrc/mpi_allreduce.c -I/opt/openmpi/include -L/opt/openmpi/lib -lmpi \

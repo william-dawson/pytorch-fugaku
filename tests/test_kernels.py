@@ -7,7 +7,8 @@ being bit-identical to stock, the 2-norm beyond stock's error or its other
 cases not taking the stock kernel bit for bit, mm/addmm with a transposed
 right operand beyond stock's error (or the other cases not taking the stock
 kernel bit for bit), bmm (and its gradients) not matching a slice-by-slice
-product.
+product, or bernoulli_ masks with the wrong mean, values, dtype handling,
+seed reproducibility or neighbour correlation.
 """
 import sys
 
@@ -138,5 +139,27 @@ a, b = torch.randn(64, 83, 83), torch.randn(64, 83, 32)
 check(torch.allclose(torch.bmm(a, b), torch.stack([a[i] @ b[i] for i in range(64)]), atol=1e-4),
       "bmm float32 against slice-by-slice")
 check(not torch.backends.mkldnn.enabled, "oneDNN off")
+check("bernoulli" in st["kernels"], "bernoulli_ override loaded")
+bn = 1 << 22
+for p in (0.0, 0.1, 0.5, 0.9, 1.0):
+    m = torch.empty(bn).bernoulli_(p)
+    tol = 6 * (p * (1 - p) / bn) ** 0.5 + 1e-12  # 6 sigma
+    check(set(torch.unique(m).tolist()) <= {0.0, 1.0} and abs(m.mean().item() - p) <= tol,
+          f"bernoulli_({p}): values 0/1, mean {m.mean().item():.5f}")
+torch.manual_seed(1); m1 = torch.empty(bn).bernoulli_(0.5)
+torch.manual_seed(1); m2 = torch.empty(bn).bernoulli_(0.5)
+m3 = torch.empty(bn).bernoulli_(0.5)
+check(torch.equal(m1, m2) and 0.45 < (m2 != m3).float().mean().item() < 0.55,
+      "bernoulli_ reproducible under manual_seed; consecutive calls independent")
+c = m1 - 0.5
+check(abs((c[1:] * c[:-1]).mean().item() / 0.25) < 6 / bn ** 0.5, "bernoulli_ neighbour correlation ~0")
+for dt in (torch.float64, torch.bfloat16):
+    m = torch.empty(1 << 20, dtype=dt).bernoulli_(0.25)
+    check(m.dtype == dt and abs(m.float().mean().item() - 0.25) < 0.01, f"bernoulli_ {dt}")
+ncb = torch.empty(1024, 1024).t().bernoulli_(0.75)
+check(abs(ncb.mean().item() - 0.75) < 0.01, "bernoulli_ non-contiguous")
+y = torch.nn.functional.dropout(torch.ones(bn), 0.1, training=True)
+scale = torch.tensor(1 / 0.9).item()
+check(set(torch.unique(y).tolist()) <= {0.0, scale} and abs(y.mean().item() - 1) < 0.01, "dropout values and mean")
 print("PASS" if not failures else f"FAIL: {failures}")
 sys.exit(1 if failures else 0)

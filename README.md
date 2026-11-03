@@ -142,6 +142,12 @@ Kernels on one CMG, 16 M float32 elements:
 | `tanh` | 43.5 ms | 4.0 ms |
 | `bmm`, 4096 x 32x32x32 | 111 ms | 7.2 ms |
 | `linalg_vector_norm` (gradient clipping), 163 M float32 in 149 tensors | 197 ms | 23 ms |
+| `bernoulli_(0.9)` (dropout's mask), 12.6 M float32 | 312 ms | 6.3 ms |
+
+The `bernoulli_` override (a keyed counter hash, seeded from torch's generator) makes GPT-style
+training with dropout about 4x faster: GPT-2-sized (125M) at 4 ranks x 12 threads went from 38.7
+to 9.8 s per step. Its random stream differs from the stock wheel's, so losses are not
+bit-identical to runs without torch_fugaku.
 | `X . W^T`, 2048x8192 by (2048x8192)^T (Llama `down_proj`) | 170 GF/s | 696 GF/s |
 
 ## Fujitsu's linear algebra (optional)

@@ -16,7 +16,11 @@ The legacy SIF cannot run the benchkit workload, and the benchkit comparison doe
   (`assets/fastdrop`) and mimalloc.** Wherever 4 × 12 fits, it is the fastest of the three stacks
   on everything measured:
   - **Legacy SIF:** 1.5× faster at GPT-125M and 2.5× faster at GPT-1.3B per node.
-  - **New SIF:** 10% faster on benchkit's 16-node row, and 20-25% faster on GPT-125M and 1.3B.
+  - **New SIF:** 5-10% faster on benchkit's 12- and 16-node rows. With the new SIF also using the
+    fast dropout kernel (now in `torch_fugaku`), LLVM is 2% faster at GPT-125M and 15% faster at
+    GPT-1.3B.
+- **The container is close behind and covers more layouts.** Wide ranks work there, and it needs
+  none of the LLVM build's run-time fixes.
 - **The LLVM build is unusable with fewer than 4 ranks per node** (2 × 24, 1 × 48): about 40×
   slower, see below.
 - **Benchkit at 4 × 12 fits only at 12 and 16 nodes, on both stacks.** There LLVM leads by 5-10%:
@@ -168,6 +172,8 @@ stated.
 | LLVM | same | 32.1 s | 511 | 53487645 |
 | **LLVM + fast dropout** | same | **9.54 s** | **1,717** | 53493468 |
 | LLVM, dropout 0 | same | 8.07 s | 2,030 | 53488227 |
+| **New SIF + fast dropout** (torch_fugaku `bernoulli`) | same | **9.77 s** | **1,677** | 53498044 |
+| LLVM + fast dropout, same time as the row above | same | 9.55 s | 1,716 | 53498059 |
 
 At 4 nodes the 125M per-node rates are the same within 2% (legacy 53487631, new SIF 53487649,
 LLVM 53487654).
@@ -180,6 +186,16 @@ LLVM 53487654).
 | LLVM | same | 40.2 s | 102 | 53492160 |
 | **LLVM + fast dropout** | same | **23.4 s** | **175** | 53493472 |
 | LLVM, dropout 0 | same | 21.3 s | 193 | 53492175 |
+| **New SIF + fast dropout** (torch_fugaku `bernoulli`) | same | **25.5 s** | **161** | 53498082 |
+| LLVM + fast dropout, same time as the row above | same | 22.2 s | 185 | 53498089 |
+
+**With fast dropout on both new stacks** (`torch_fugaku/csrc/bernoulli.cpp`, the same algorithm as
+`assets/fastdrop`), the masks are bit-identical between them and so are the losses, step by step.
+- **GPT-125M:** the new SIF nearly matches LLVM, 1,677 vs 1,716 tokens/s per node (+2% LLVM).
+- **GPT-1.3B:** LLVM leads by 15% (185 vs 161).
+- **Against the legacy SIF:** both are well ahead, 1.5× at 125M and 2.3-2.6× at 1.3B.
+- **Effect on the new SIF itself:** the port made it 4.0× faster at 125M (423 → 1,677) and 1.9× at
+  1.3B (84 → 161).
 
 **Plain data-parallel 1.3B fits nowhere** in a 32 GB node: 1 rank × 48 ran out of memory on the
 legacy SIF (glibc and mimalloc), the new SIF and LLVM, on 1 and 4 nodes. Jobs:
@@ -206,4 +222,6 @@ Profile of one GPT-125M step, rank 0, self CPU (jobs 53488190 / 53488202 / 53488
 Stock PyTorch's CPU `bernoulli_` is scalar on aarch64; Fujitsu's 1.13 fork does it about 33×
 faster. GELU differs by under 2% of the step. Matmuls are comparable, with LLVM slightly ahead.
 `assets/fastdrop` fixes the dropout cost for the LLVM build; see [performance.md](performance.md).
-The new SIF has the same problem.
+The new SIF gets the same kernel as `torch_fugaku`'s `bernoulli` override. Built with the image's
+g++ 12 (generic aarch64), it runs at 6.3 ms against 312 ms stock for 12.6M elements (job 53497747).
+The SVE-tuned LLVM build runs it at 1.85 ms.

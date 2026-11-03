@@ -298,6 +298,50 @@
    "steady_step_s": null,
    "tokens_per_s_per_node": null,
    "job": "53495301 (out of memory step 1 with common_tofu_large_recv_buf_size=262144)"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "new-sif+fastdrop",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 9.77,
+   "tokens_per_s_per_node": 1677,
+   "job": "53498044"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm+fastdrop",
+   "model": "gpt-125m seq1024",
+   "nodes": 1,
+   "layout": "4x12 ZeRO-0 mbs4",
+   "dropout": 0.1,
+   "steady_step_s": 9.55,
+   "tokens_per_s_per_node": 1716,
+   "job": "53498059"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "new-sif+fastdrop",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.1,
+   "steady_step_s": 25.49,
+   "tokens_per_s_per_node": 161,
+   "job": "53498082"
+  },
+  {
+   "comparison": "legacy",
+   "stack": "llvm+fastdrop",
+   "model": "gpt-1.3b seq1024",
+   "nodes": 4,
+   "layout": "4x12 ZeRO-3",
+   "dropout": 0.1,
+   "steady_step_s": 22.15,
+   "tokens_per_s_per_node": 185,
+   "job": "53498089"
   }
  ]
 }
