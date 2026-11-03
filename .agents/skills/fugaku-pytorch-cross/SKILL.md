@@ -26,7 +26,16 @@ CPython **3.11.5 AArch64**. Sources and wheel checksums are pinned in
   and its small machine-readable evidence files. Historical PASS records are not fresh validation.
 
 Read [references/large-pages.md](references/large-pages.md) for the required
-system allocator, linked Python runner, library-path isolation and current H2H results.
+system allocator, linked Python runner and library-path isolation.
+
+**For training performance, read [references/performance.md](references/performance.md) first.**
+The large-page build as built trains 10x slower than the container. Three run-time settings, no
+rebuild, make it match the container at 125M and beat it by 15% at 1B:
+`#PJM --llio cn-cache-size=384Mi`, the `fjmpi_port` backend (container's `c10d_mpi.cpp` built
+against the wheel) instead of `mpi`, and mimalloc preloaded into the Python process at 1B scale.
+The page also lists every dead end and the measurement pitfalls. Harness and backends are in
+`assets/h2h/`, `assets/backends/`, `assets/alloc/`. Communication overlap (Fujitsu persistent
+collectives, the experimental `fjmpi_async`) is in [references/overlap.md](references/overlap.md).
 
 ## Operational invariants
 
@@ -44,6 +53,9 @@ system allocator, linked Python runner, library-path isolation and current H2H r
    processes just because their PIDs match an old record.
 6. A successful build is followed by real compute-node tests. PJM `EXT` is not
    an application success code. Require the recorded exit code and complete rank outputs.
+7. Performance comparisons run the two stacks concurrently or in one allocation, with all
+   instrumentation that walks page tables or runs inside a rank's CPU set switched off
+   (see performance.md, "Measurement pitfalls"). Spread between allocations reaches ~10%.
 
 ## Supplied material
 

@@ -76,6 +76,11 @@ into the application and no user Python installation is overwritten.
 
 ## First training comparison, not a speedup claim
 
+**Resolved:** the slowdown below came from LLIO's 128 MiB compute-node cache, torch's
+ProcessGroupMPI, and (at 1B) the allocator. With fixes the build matches or beats the container.
+See [performance.md](performance.md). The tuning sequence at the end of this page was carried out
+there. Step 2 (fault addresses) found the cause.
+
 Same 151,020,288-parameter Llama, FP32, ZeRO-3, sequence 128, microbatch 1,
 checkpointing, two nodes, four ranks per node and 12 threads each. Nine steps,
 three warmups. Input hashes match across the fresh/container pair; initial

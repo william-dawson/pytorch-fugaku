@@ -1,0 +1,335 @@
+{
+ "description": "Training head-to-head, LLVM cross build vs pytorch-fugaku container SIF (b5879f2). FP32 DeepSpeed 0.19.8 ZeRO-3, seq 128, micro-batch 1, checkpointing, low-mem, 4 ranks x 12 threads per node, freq=2000 eco_state=0, --llio cn-cache-size=384Mi. steady_s = median over post-warmup steps of the slowest rank. See references/performance.md.",
+ "date": "2026-11-03",
+ "runs": [
+  {
+   "job": "53463780",
+   "case": "container",
+   "model": "llama-125m",
+   "nodes": 8,
+   "ranks": 32,
+   "note": "container fjmpi",
+   "steady_s": 2.803,
+   "steps_s": [
+    5.987,
+    6.047,
+    2.833,
+    2.81,
+    2.785,
+    2.806,
+    2.812,
+    2.808,
+    2.836,
+    2.779,
+    2.801,
+    2.779
+   ],
+   "losses": [
+    9.8536,
+    9.8594,
+    9.8616,
+    9.8472,
+    9.8467,
+    9.8499,
+    9.8598,
+    9.8598,
+    9.8563,
+    9.8604,
+    9.8655,
+    9.8512
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 0.872,
+     "minor_faults": 6314
+    },
+    "backward": {
+     "wall_s": 1.844,
+     "minor_faults": 5519
+    },
+    "step": {
+     "wall_s": 0.079,
+     "minor_faults": 92
+    }
+   }
+  },
+  {
+   "job": "53463780",
+   "case": "llvm-port",
+   "model": "llama-125m",
+   "nodes": 8,
+   "ranks": 32,
+   "note": "fjmpi_port, libmpg large pages",
+   "steady_s": 2.696,
+   "steps_s": [
+    4.051,
+    5.991,
+    2.729,
+    2.712,
+    2.678,
+    2.708,
+    2.69,
+    2.709,
+    2.693,
+    2.7,
+    2.707,
+    2.691
+   ],
+   "losses": [
+    9.8536,
+    9.8594,
+    9.8616,
+    9.8472,
+    9.8467,
+    9.8499,
+    9.8598,
+    9.8598,
+    9.8563,
+    9.8604,
+    9.8655,
+    9.8512
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 0.81,
+     "minor_faults": 282
+    },
+    "backward": {
+     "wall_s": 1.81,
+     "minor_faults": 0
+    },
+    "step": {
+     "wall_s": 0.072,
+     "minor_faults": 0
+    }
+   }
+  },
+  {
+   "job": "53469399",
+   "case": "llvm-port+nohp-af1",
+   "model": "1b",
+   "nodes": 4,
+   "ranks": 16,
+   "note": "fjmpi_port, libmpg large pages off (refaults)",
+   "steady_s": 12.698,
+   "steps_s": [
+    14.914,
+    13.382,
+    12.693,
+    12.682,
+    12.698,
+    12.683,
+    12.701,
+    12.709,
+    12.7,
+    12.695,
+    12.688,
+    12.679
+   ],
+   "losses": [
+    12.2166,
+    12.158,
+    12.1537,
+    12.1701,
+    12.1632,
+    12.1766,
+    12.1679,
+    12.1922,
+    12.155,
+    12.1302,
+    12.1579,
+    12.1906
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 3.702,
+     "minor_faults": 106107
+    },
+    "backward": {
+     "wall_s": 8.611,
+     "minor_faults": 232144
+    },
+    "step": {
+     "wall_s": 0.374,
+     "minor_faults": 6699
+    }
+   }
+  },
+  {
+   "job": "53477800",
+   "case": "container",
+   "model": "1b",
+   "nodes": 4,
+   "ranks": 16,
+   "note": "container fjmpi, concurrent with the next two",
+   "steady_s": 11.164,
+   "steps_s": [
+    14.15,
+    12.335,
+    11.172,
+    11.165,
+    11.179,
+    11.159,
+    11.192,
+    11.164,
+    11.177,
+    11.161,
+    11.163,
+    11.205,
+    11.157,
+    11.148
+   ],
+   "losses": [
+    12.2166,
+    12.158,
+    12.1537,
+    12.1701,
+    12.1632,
+    12.1766,
+    12.1679,
+    12.1922,
+    12.155,
+    12.1302,
+    12.1579,
+    12.1906,
+    12.1941,
+    12.1809
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 2.969,
+     "minor_faults": 4625
+    },
+    "backward": {
+     "wall_s": 7.857,
+     "minor_faults": 7835
+    },
+    "step": {
+     "wall_s": 0.338,
+     "minor_faults": 11
+    }
+   }
+  },
+  {
+   "job": "53477818",
+   "case": "llvm-port+mi",
+   "model": "1b",
+   "nodes": 4,
+   "ranks": 16,
+   "note": "fjmpi_port, mimalloc LD_PRELOAD, libmpg large pages on",
+   "steady_s": 9.515,
+   "steps_s": [
+    11.535,
+    10.213,
+    9.506,
+    9.526,
+    9.513,
+    9.512,
+    9.516,
+    9.522,
+    9.524,
+    9.509,
+    9.512,
+    9.511,
+    9.518,
+    9.515
+   ],
+   "losses": [
+    12.2166,
+    12.158,
+    12.1537,
+    12.1701,
+    12.1632,
+    12.1766,
+    12.1679,
+    12.1922,
+    12.155,
+    12.1302,
+    12.1579,
+    12.1906,
+    12.1941,
+    12.1809
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 2.552,
+     "minor_faults": 5367
+    },
+    "backward": {
+     "wall_s": 6.623,
+     "minor_faults": 9619
+    },
+    "step": {
+     "wall_s": 0.334,
+     "minor_faults": 131
+    }
+   }
+  },
+  {
+   "job": "53477832",
+   "case": "llvm-port+mi-nohp",
+   "model": "1b",
+   "nodes": 4,
+   "ranks": 16,
+   "note": "fjmpi_port, mimalloc LD_PRELOAD, libmpg large pages off",
+   "steady_s": 9.801,
+   "steps_s": [
+    11.394,
+    10.509,
+    9.791,
+    9.805,
+    9.789,
+    9.805,
+    9.799,
+    9.804,
+    9.811,
+    9.803,
+    9.799,
+    9.796,
+    9.808,
+    9.797
+   ],
+   "losses": [
+    12.2166,
+    12.158,
+    12.1537,
+    12.1701,
+    12.1632,
+    12.1766,
+    12.1679,
+    12.1922,
+    12.155,
+    12.1302,
+    12.1579,
+    12.1906,
+    12.1941,
+    12.1809
+   ],
+   "phases_mean": {
+    "forward": {
+     "wall_s": 2.702,
+     "minor_faults": 5434
+    },
+    "backward": {
+     "wall_s": 6.759,
+     "minor_faults": 11333
+    },
+    "step": {
+     "wall_s": 0.334,
+     "minor_faults": 130
+    }
+   }
+  },
+  {
+   "job": "53367016 / 53411647",
+   "case": "container / llvm fjmpi_port",
+   "model": "llama-125m",
+   "nodes": 2,
+   "steady_s": {
+    "container": 2.4,
+    "llvm": 2.336
+   },
+   "note": "2-node result from h2h-mlock-test; losses identical on all 9 steps"
+  }
+ ]
+}

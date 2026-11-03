@@ -25,6 +25,21 @@ pretend configure probes succeeded.
 | Python or NumPy silently disabled | Use a native x86 Python 3.11 for generation and explicit AArch64 Python 3.11/NumPy headers. Check `BUILD_PYTHON`, `USE_NUMPY`, the include paths and MPI binding defines before compiling. |
 | Threads reported incorrectly; threaded BLAS crashes with LLVM runtime | Check active runtime precedence, the `libfj90i` stubs and unwanted `libomp` linkage. Use the Fujitsu OpenMP configuration described in toolchain.md. |
 
+## Runtime and performance signatures
+
+From the November 2026 training work; details and evidence in [performance.md](performance.md).
+
+| Signature | Cause and fix |
+|---|---|
+| Hundreds of major faults every backward, on the same `libtorch_cpu.so` code pages; steps never settle | LLIO compute-node cache (default 128 MiB) smaller than torch's code. `#PJM --llio cn-cache-size=384Mi`. `mlock`, `$PJM_LOCALTMP` and `/2ndfs` do not help. |
+| Backward stalls of seconds to minutes; perf shows libfjomp barrier spin and one thread in libmpi/libtofucom | torch `ProcessGroupMPI`. Use `fjmpi_port` (`assets/backends`). `OMP_WAIT_POLICY=PASSIVE` makes it worse. |
+| `environment variable RANK expected` from `init_process_group("fjmpi_port")` | Source pf-setup's `pf.env` and export `RANK=$PMIX_RANK`, `LOCAL_RANK`, `LOCAL_SIZE`, `USE_LIBUV=0`. |
+| 1B: exit 137 on some ranks, or `Bus error ... Non-existant physical address` inside libmpi | Node out of memory: libmpg large pages, host glibc, or mimalloc with `MIMALLOC_PURGE_DELAY=-1`. Preload mimalloc with its default purge delay. |
+| 1B: 20-30x the container's minor faults, high system CPU, matmul time identical | libmpg with `XOS_MMM_L_HPAGE_TYPE=none` returns freed memory and refaults it. Preload mimalloc. |
+| Step times jitter 2x; involuntary context switches concentrate on one rank per node | Something runs inside that rank's CPU set (in our case a memory sampler) and preempts spinning OpenMP threads. Remove it. |
+| `/dev/shm` staging: `Permission denied`, exit 126 | `/dev/shm` is noexec on compute nodes. |
+| `module: command not found` when building over ssh | Non-login shell. `bash -lc 'bash build.sh'`. |
+
 ## Caches, aliases and restart discipline
 
 The same data directory was visible as `/vol0402/data/...` and

@@ -3,6 +3,9 @@
 **November 2026 update:** see [large-pages.md](large-pages.md) for the fresh
 allocator rebuild, linked runner, current validation and performance limitations.
 Earlier benchmark records below describe the previous allocator build.
+For training throughput against the container (now matched at 125M, 15% faster at 1B),
+see [performance.md](performance.md); machine-readable summary in
+`evidence/h2h-training-results.json`.
 
 These are historical results from the successful staged build, not a substitute
 for validation of a fresh reproduction. The tested remote workspace was
