@@ -18,7 +18,7 @@
 // Prints one JSON line per size on rank 0: time per call (median of reps, max over ranks) and node
 // MemAvailable before MPI_Init and after the timed calls (min over nodes).
 //
-// usage: mpiexec ... ./rs_bench <variant> <reps> <floats per call>...
+// usage: [SPLIT=k] mpiexec ... ./rs_bench <variant> <reps> <floats per call>...
 #include <mpi.h>
 #include <omp.h>
 
@@ -34,6 +34,7 @@ extern "C" int MPIX_Allgather_init(const void *, int, MPI_Datatype, void *, int,
                                    MPI_Request *);
 
 static int rank_, size_;
+static MPI_Comm g_comm = MPI_COMM_NULL;  // MPI_COMM_WORLD, or one of SPLIT concurrent groups
 
 static double mem_avail_gb() {
   std::ifstream f("/proc/meminfo");
@@ -57,7 +58,7 @@ static void a2a_staged(const float *in, float *out, size_t n, std::vector<float>
     const size_t cnt = std::min(chunk, n - off);
     for (int r = 0; r < size_; ++r) std::memcpy(&si[r * cnt], in + r * n + off, cnt * sizeof(float));
     MPI_Alltoall(si.data(), static_cast<int>(cnt), MPI_FLOAT, so.data(), static_cast<int>(cnt), MPI_FLOAT,
-                 MPI_COMM_WORLD);
+                 g_comm);
 #pragma omp parallel for
     for (size_t j = 0; j < cnt; ++j) {
       float s = 0;
@@ -68,7 +69,7 @@ static void a2a_staged(const float *in, float *out, size_t n, std::vector<float>
 }
 
 static void a2a(const float *in, float *out, size_t n, std::vector<float> &recv) {
-  MPI_Alltoall(in, static_cast<int>(n), MPI_FLOAT, recv.data(), static_cast<int>(n), MPI_FLOAT, MPI_COMM_WORLD);
+  MPI_Alltoall(in, static_cast<int>(n), MPI_FLOAT, recv.data(), static_cast<int>(n), MPI_FLOAT, g_comm);
 #pragma omp parallel for
   for (size_t j = 0; j < n; ++j) {
     float s = 0;
@@ -85,7 +86,7 @@ static void ring(const float *in, float *out, size_t n, std::vector<float> &acc,
   for (int k = 0; k < size_ - 1; ++k) {
     const int s = ((rank_ - k - 1) % size_ + size_) % size_, r = ((rank_ - k - 2) % size_ + size_) % size_;
     MPI_Sendrecv(&acc[s * n], static_cast<int>(n), MPI_FLOAT, next, k, tmp.data(), static_cast<int>(n), MPI_FLOAT,
-                 prev, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                 prev, k, g_comm, MPI_STATUS_IGNORE);
     add_into(&acc[r * n], tmp.data(), n);
   }
   std::memcpy(out, &acc[rank_ * n], n * sizeof(float));
@@ -102,7 +103,7 @@ static void halving(const float *in, float *out, size_t n, std::vector<float> &a
     const int keep_lo = upper ? mid : lo, send_lo = upper ? lo : mid;
     const size_t cnt = static_cast<size_t>(mid - lo) * n;
     MPI_Sendrecv(&acc[send_lo * n], static_cast<int>(cnt), MPI_FLOAT, partner, d, tmp.data(), static_cast<int>(cnt),
-                 MPI_FLOAT, partner, d, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                 MPI_FLOAT, partner, d, g_comm, MPI_STATUS_IGNORE);
     add_into(&acc[keep_lo * n], tmp.data(), cnt);
     hi = keep_lo + (mid - lo);  // the kept half
     lo = keep_lo;
@@ -112,7 +113,7 @@ static void halving(const float *in, float *out, size_t n, std::vector<float> &a
 
 static void allreduce(const float *in, float *out, size_t n, std::vector<float> &acc) {
   std::memcpy(acc.data(), in, n * size_ * sizeof(float));
-  MPI_Allreduce(MPI_IN_PLACE, acc.data(), static_cast<int>(n * size_), MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, acc.data(), static_cast<int>(n * size_), MPI_FLOAT, MPI_SUM, g_comm);
   std::memcpy(out, &acc[rank_ * n], n * sizeof(float));
 }
 
@@ -123,7 +124,7 @@ static void ag_staged(const float *in, float *out, size_t n, std::vector<float> 
     const size_t cnt = std::min(chunk, n - off);
     std::memcpy(si.data(), in + off, cnt * sizeof(float));
     MPI_Allgather(si.data(), static_cast<int>(cnt), MPI_FLOAT, so.data(), static_cast<int>(cnt), MPI_FLOAT,
-                  MPI_COMM_WORLD);
+                  g_comm);
     for (int r = 0; r < size_; ++r) std::memcpy(out + r * n + off, &so[r * cnt], cnt * sizeof(float));
   }
 }
@@ -134,15 +135,23 @@ static void ag_ring(const float *in, float *out, size_t n) {
   for (int k = 0; k < size_ - 1; ++k) {
     const int s = ((rank_ - k) % size_ + size_) % size_, r = ((rank_ - k - 1) % size_ + size_) % size_;
     MPI_Sendrecv(out + s * n, static_cast<int>(n), MPI_FLOAT, next, k, out + r * n, static_cast<int>(n), MPI_FLOAT,
-                 prev, k, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                 prev, k, g_comm, MPI_STATUS_IGNORE);
   }
 }
 
 int main(int argc, char **argv) {
   const double mem0 = mem_avail_gb();
   MPI_Init(&argc, &argv);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
-  MPI_Comm_size(MPI_COMM_WORLD, &size_);
+  // SPLIT=k: k concurrent groups, rank r in group r % k. With k = ranks per node, each group has
+  // one rank per node: the data-parallel groups of tensor parallel k inside a node (tp_train).
+  g_comm = MPI_COMM_WORLD;
+  if (const char *k = std::getenv("SPLIT")) {
+    int wr;
+    MPI_Comm_rank(MPI_COMM_WORLD, &wr);
+    MPI_Comm_split(MPI_COMM_WORLD, wr % std::atoi(k), wr, &g_comm);
+  }
+  MPI_Comm_rank(g_comm, &rank_);
+  MPI_Comm_size(g_comm, &size_);
   if (argc < 4) {
     if (rank_ == 0) std::fprintf(stderr, "usage: rs_bench variant reps floats...\n");
     MPI_Abort(MPI_COMM_WORLD, 2);
@@ -163,7 +172,7 @@ int main(int argc, char **argv) {
     MPI_Request preq = MPI_REQUEST_NULL;
     if (v == "ag_persist")
       MPIX_Allgather_init(in.data(), static_cast<int>(n), MPI_FLOAT, out.data(), static_cast<int>(n), MPI_FLOAT,
-                          MPI_COMM_WORLD, MPI_INFO_NULL, &preq);
+                          g_comm, MPI_INFO_NULL, &preq);
     if (v == "a2a_staged") w1.resize((8u << 20) / sizeof(float)), w2.resize((8u << 20) / sizeof(float));
     if (v == "a2a") w1.resize(n * size_);
     if (v == "ring" || v == "halving") w1.resize(n * size_), w2.resize(n * size_);
@@ -171,23 +180,23 @@ int main(int argc, char **argv) {
     auto run = [&] {
       if (v == "a2a_staged") a2a_staged(in.data(), out.data(), n, w1, w2);
       else if (v == "a2a") a2a(in.data(), out.data(), n, w1);
-      else if (v == "rsb") MPI_Reduce_scatter_block(in.data(), out.data(), static_cast<int>(n), MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+      else if (v == "rsb") MPI_Reduce_scatter_block(in.data(), out.data(), static_cast<int>(n), MPI_FLOAT, MPI_SUM, g_comm);
       else if (v == "ring") ring(in.data(), out.data(), n, w1, w2);
       else if (v == "halving") halving(in.data(), out.data(), n, w1, w2);
       else if (v == "allreduce") allreduce(in.data(), out.data(), n, w1);
       else if (v == "ag_staged") ag_staged(in.data(), out.data(), n, w1, w2);
-      else if (v == "ag") MPI_Allgather(in.data(), static_cast<int>(n), MPI_FLOAT, out.data(), static_cast<int>(n), MPI_FLOAT, MPI_COMM_WORLD);
+      else if (v == "ag") MPI_Allgather(in.data(), static_cast<int>(n), MPI_FLOAT, out.data(), static_cast<int>(n), MPI_FLOAT, g_comm);
       else if (v == "ag_ring") ag_ring(in.data(), out.data(), n);
       else if (v == "ag_persist") MPI_Start(&preq), MPI_Wait(&preq, MPI_STATUS_IGNORE);
       else MPI_Abort(MPI_COMM_WORLD, 3);
     };
     std::vector<double> ts;
     for (int r = 0; r <= reps; ++r) {
-      MPI_Barrier(MPI_COMM_WORLD);
+      MPI_Barrier(g_comm);
       const double t0 = MPI_Wtime();
       run();
       double t = MPI_Wtime() - t0, tmax;
-      MPI_Allreduce(&t, &tmax, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      MPI_Allreduce(&t, &tmax, 1, MPI_DOUBLE, MPI_MAX, g_comm);
       if (r) ts.push_back(tmax);  // first call is warm-up (connections, registration)
     }
     std::sort(ts.begin(), ts.end());
@@ -200,10 +209,10 @@ int main(int argc, char **argv) {
       if (out[j] != static_cast<float>((j / n) % 7 + (j % n) % 5)) { ok = 0; break; }
     if (preq != MPI_REQUEST_NULL) MPI_Request_free(&preq);
     int all_ok;
-    MPI_Allreduce(&ok, &all_ok, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+    MPI_Allreduce(&ok, &all_ok, 1, MPI_INT, MPI_LAND, g_comm);
     double mem1 = mem_avail_gb(), m0, m1;
-    MPI_Allreduce(&mem0, &m0, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
-    MPI_Allreduce(&mem1, &m1, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(&mem0, &m0, 1, MPI_DOUBLE, MPI_MIN, g_comm);
+    MPI_Allreduce(&mem1, &m1, 1, MPI_DOUBLE, MPI_MIN, g_comm);
     if (rank_ == 0)
       std::printf("{\"variant\":\"%s\",\"ranks\":%d,\"threads\":%d,\"floats\":%zu,\"bytes_in_per_rank\":%zu,"
                   "\"time_s\":%.6f,\"gbps_in\":%.2f,\"ok\":%d,\"mem_avail_before_gb\":%.2f,\"mem_avail_after_gb\":%.2f}\n",

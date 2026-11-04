@@ -219,10 +219,17 @@ Jobs 53512513-53512527; data in `evidence/collectives-2026-11-04.json`.
 
 **Fix.** `torch_fugaku/csrc/c10d_mpi.cpp` takes `TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring`
 (default `auto`). Both the image's `fjmpi` and fjmpi_port build this file.
-- `auto` uses `staged` below 64 ranks, `ring` at 4 or more ranks per node (counted with
-  `MPI_Comm_split_type`), and `a2a` otherwise.
-- Ring runs through the two staging buffers, so Tofu never registers new memory.
-- Rank 0 logs the choice: `fjmpi: reduce_scatter uses ring (64 ranks, 4 per node)`.
+- `auto` decides by the ranks per node of the **whole job** (`MPI_Comm_split_type` on
+  `MPI_COMM_WORLD`), not of the group: `ring` at 4 or more, one unstaged `a2a` otherwise.
+  (First version: staged below 64 ranks. One-rank-per-node groups, below, showed the job's
+  count is what matters, and that staged collapses at 1 × 48 even at 32 ranks: 8.3 s vs 0.145 s
+  for a2a per 573 MB call, job 53589759.)
+- `TORCH_FUGAKU_AG_ALGO=auto|staged|ring`: `auto` gathers in a ring in groups with one rank per
+  node inside a job with 4+ ranks per node (tensor parallel × FSDP's data-parallel groups,
+  [thirty-b.md](thirty-b.md)); staged otherwise.
+- Rings run through the two staging buffers, so Tofu never registers new memory.
+- World rank 0 logs each group's choice: `fjmpi: group of 32 ranks, 1 per node (job: 4 per node):
+  reduce_scatter ring, allgather ring`.
 - `tests/test_backend_mpi.py` passes under all four settings (job 53575982).
 
 **Training** (benchkit Llama-1B, seq 2048, ZeRO-3; each pair ran in one allocation; losses

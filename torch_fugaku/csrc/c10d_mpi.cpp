@@ -7,10 +7,14 @@
 // without Fujitsu's large pages, Tofu registers every new buffer it sends, and torch's
 // allocator keeps presenting new ones. TORCH_FUGAKU_STAGE_MB=0 sends the tensors themselves.
 //
-// Reduce-scatter picks its algorithm (TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring, default auto) from
-// Fujitsu MPI's behaviour measured with rs_bench: from 64 ranks the staged all-to-all becomes latency
-// bound (8 MB / ranks per peer), a ring is 4-5x faster at 4 ranks per node, and at fewer ranks per
-// node point-to-point traffic is so slow that one unstaged all-to-all wins.
+// Reduce-scatter and allgather pick their algorithms (TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring,
+// TORCH_FUGAKU_AG_ALGO=auto|staged|ring; default auto) from Fujitsu MPI's behaviour measured with
+// rs_bench. What matters is how many ranks the whole job runs per node:
+// - 4+ (one per CMG): a ring reduce-scatter is 2-5x faster than the staged all-to-all, in the world
+//   group and in sub-groups with one rank per node (tensor parallel x FSDP's data-parallel groups).
+//   Those sub-groups also gather fastest in a ring.
+// - fewer: reductions between point-to-point steps collapse (a ring took seconds), and the staged
+//   all-to-all is latency bound (8 MB / ranks per peer); one unstaged all-to-all wins.
 //
 // TORCH_FUGAKU_COMM_STATS=1 times every collective by kind (stats() / reset_stats() from Python);
 // =2 also enters an MPI_Barrier first and counts its time apart, as skew: the wait for the last
@@ -37,6 +41,9 @@ std::mutex mpi_mutex;               // MPI_THREAD_SERIALIZED: one caller at a ti
 char *stage_in = nullptr, *stage_out = nullptr;
 enum class RsAlgo { Auto, Staged, A2a, Ring };
 RsAlgo kRsAlgo = RsAlgo::Auto;
+enum class AgAlgo { Auto, Staged, Ring };
+AgAlgo kAgAlgo = AgAlgo::Auto;
+int kJobNodeRanks = 0;  // ranks per node in MPI_COMM_WORLD
 
 enum Kind { kAllgather, kReduceScatter, kAllreduce, kBroadcast, kOther, kKinds };
 const char *kKindNames[kKinds] = {"allgather", "reduce_scatter", "allreduce", "broadcast", "other"};
@@ -92,6 +99,17 @@ void ensure_init() {
   if (!ok) check(MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SERIALIZED, &provided), "MPI_Init_thread");
   if (const char *mb = std::getenv("TORCH_FUGAKU_STAGE_MB")) kStage = std::strtoull(mb, nullptr, 10) << 20;
   if (const char *c = std::getenv("TORCH_FUGAKU_COMM_STATS")) kCommStats = std::atoi(c);
+  if (kJobNodeRanks == 0) {  // the first call creates the world group, on every rank
+    MPI_Comm node;
+    check(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node), "MPI_Comm_split_type");
+    MPI_Comm_size(node, &kJobNodeRanks);
+    MPI_Comm_free(&node);
+  }
+  if (const char *a = std::getenv("TORCH_FUGAKU_AG_ALGO")) {
+    const std::string v = a;
+    TORCH_CHECK(v == "auto" || v == "staged" || v == "ring", "fjmpi: TORCH_FUGAKU_AG_ALGO must be auto, staged or ring, not ", v);
+    kAgAlgo = v == "staged" ? AgAlgo::Staged : v == "ring" ? AgAlgo::Ring : AgAlgo::Auto;
+  }
   if (const char *a = std::getenv("TORCH_FUGAKU_RS_ALGO")) {
     const std::string v = a;
     TORCH_CHECK(v == "auto" || v == "staged" || v == "a2a" || v == "ring",
@@ -197,15 +215,17 @@ class FjMpiBackend : public c10d::Backend {
     MPI_Comm_size(node, &node_ranks);
     MPI_Comm_free(&node);
     rs_algo_ = kRsAlgo;
-    if (rs_algo_ == RsAlgo::Auto)
-      rs_algo_ = size < 64 ? RsAlgo::Staged : node_ranks >= 4 ? RsAlgo::Ring : RsAlgo::A2a;
+    if (rs_algo_ == RsAlgo::Auto) rs_algo_ = kJobNodeRanks >= 4 ? RsAlgo::Ring : RsAlgo::A2a;
     if (kStage == 0 && rs_algo_ == RsAlgo::Staged) rs_algo_ = RsAlgo::A2a;
-    static bool told = false;
-    if (rank == 0 && !told) {
-      told = true;
-      const char *names[] = {"auto", "staged", "a2a", "ring"};
-      std::fprintf(stderr, "fjmpi: reduce_scatter uses %s (%d ranks, %d per node)\n",
-                   names[static_cast<int>(rs_algo_)], size, node_ranks);
+    ag_algo_ = kAgAlgo;
+    if (ag_algo_ == AgAlgo::Auto)
+      ag_algo_ = node_ranks == 1 && kJobNodeRanks >= 4 && size > 2 ? AgAlgo::Ring : AgAlgo::Staged;
+    int world_rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    if (world_rank == 0) {  // once per group world rank 0 belongs to
+      const char *rs[] = {"auto", "staged", "a2a", "ring"}, *ag[] = {"auto", "staged", "ring"};
+      std::fprintf(stderr, "fjmpi: group of %d ranks, %d per node (job: %d per node): reduce_scatter %s, allgather %s\n",
+                   size, node_ranks, kJobNodeRanks, rs[static_cast<int>(rs_algo_)], ag[static_cast<int>(ag_algo_)]);
     }
   }
 
@@ -385,6 +405,7 @@ class FjMpiBackend : public c10d::Backend {
  private:
   MPI_Comm comm_ = MPI_COMM_NULL;
   RsAlgo rs_algo_ = RsAlgo::Staged;
+  AgAlgo ag_algo_ = AgAlgo::Staged;
 
   void reduce_all(at::Tensor &t, const c10d::ReduceOp &op) {
     check_tensor(t);
@@ -454,6 +475,10 @@ class FjMpiBackend : public c10d::Backend {
     const size_t n = in.nbytes();
     const char *src = static_cast<const char *>(in.data_ptr());
     char *dst = static_cast<char *>(out.data_ptr());
+    if (ag_algo_ == AgAlgo::Ring && size_ > 1) {
+      ring_gather(src, dst, n);
+      return;
+    }
     if (kStage == 0) {
       TORCH_CHECK(n <= kMaxCount, "fjmpi: allgather block too large for one MPI call");
       check(MPI_Allgather(src, static_cast<int>(n), MPI_BYTE, dst, static_cast<int>(n), MPI_BYTE, comm_),
@@ -468,6 +493,25 @@ class FjMpiBackend : public c10d::Backend {
       check(MPI_Allgather(stage_in, static_cast<int>(len), MPI_BYTE, stage_out, static_cast<int>(len), MPI_BYTE,
                           comm_), "MPI_Allgather");
       for (int r = 0; r < size_; ++r) std::memcpy(dst + r * n + off, stage_out + r * len, len);
+    }
+  }
+
+  // Ring allgather in pieces of one staging buffer: at step k pass block (rank - k) to the next
+  // rank and receive block (rank - k - 1) from the previous one. Caller holds mpi_mutex.
+  void ring_gather(const char *src, char *dst, size_t n) {
+    std::memcpy(dst + rank_ * n, src, n);
+    const size_t piece = std::min(kStage ? kStage : n, kMaxCount);
+    const int next = (rank_ + 1) % size_, prev = (rank_ + size_ - 1) % size_;
+    for (size_t off = 0; off < n; off += piece) {
+      const size_t len = std::min(piece, n - off);
+      for (int k = 0; k < size_ - 1; ++k) {
+        const int sb = ((rank_ - k) % size_ + size_) % size_, rb = ((rank_ - k - 1) % size_ + size_) % size_;
+        char *sbuf = dst + sb * n + off, *rbuf = dst + rb * n + off;
+        if (kStage) std::memcpy(stage_in, sbuf, len), sbuf = stage_in, rbuf = stage_out;
+        check(MPI_Sendrecv(sbuf, static_cast<int>(len), MPI_BYTE, next, 1, rbuf, static_cast<int>(len), MPI_BYTE,
+                           prev, 1, comm_, MPI_STATUS_IGNORE), "MPI_Sendrecv");
+        if (kStage) std::memcpy(dst + rb * n + off, stage_out, len);
+      }
     }
   }
 

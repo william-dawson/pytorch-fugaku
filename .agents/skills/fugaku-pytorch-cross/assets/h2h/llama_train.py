@@ -36,6 +36,8 @@ MODELS = {
                num_key_value_heads=8, vocab_size=128256, tie_word_embeddings=False),
     "gpt-125m": dict(arch="gpt2", n_embd=768, n_layer=12, n_head=12, vocab_size=50304),
     "gpt-1.3b": dict(arch="gpt2", n_embd=2048, n_layer=24, n_head=16, vocab_size=50304),
+    # The legacy SIF's 30B (30b_pp8_tp6_dp12_inner.sh: 48 layers, hidden 6912, 72 heads, seq 2048).
+    "gpt-30b": dict(arch="gpt2", n_embd=6912, n_layer=48, n_head=72, vocab_size=50304),
 }
 
 
@@ -127,6 +129,67 @@ def chunked_lm_loss(model, chunk):
     model.forward = types.MethodType(forward, model)
 
 
+def fast_zero3():
+    """Replace ZeRO-3's two per-rank Python loops with one strided copy per tensor. DeepSpeed's
+    reduce_scatter_coalesced slices every gradient into world-size pieces and concatenates them;
+    AllGatherCoalescedHandle.wait narrows every gathered parameter world-size times and concatenates
+    again. Both cost O(ranks x tensors) small ops per step: 0.8 s at 64 ranks, 4.3 s at 512 (profiles
+    of jobs 53581789 / 53582912). The buffers keep DeepSpeed's layout, so results are identical."""
+    import math
+
+    import deepspeed.runtime.comm.coalesced_collectives as cc
+    import deepspeed.runtime.zero.stage3 as stage3
+    from deepspeed.accelerator import get_accelerator
+    from deepspeed.runtime.zero import partition_parameters as pp
+
+    @torch.no_grad()
+    def reduce_scatter_coalesced(tensors, group=None):
+        rank, world = dist.get_rank(group), dist.get_world_size(group)
+        sizes = [math.ceil(t.numel() / world) for t in tensors]
+        # [world, sum(sizes)]: row r holds every tensor's r-th chunk (padded), as DeepSpeed's cat.
+        grid = torch.empty(world, sum(sizes), dtype=tensors[0].dtype, device=tensors[0].device)
+        off = 0
+        for t, c in zip(tensors, sizes):
+            v, n = t.reshape(-1), t.numel()
+            full = n // c if c else 0
+            grid[:full, off:off + c].copy_(v[:full * c].view(full, c))
+            if full < world and n > full * c:
+                grid[full, off:off + n - full * c].copy_(v[full * c:])
+            off += c
+        grid.div_(world)  # pre-divide, as DeepSpeed
+        out = torch.empty(off, dtype=grid.dtype, device=grid.device)
+        cc._torch_reduce_scatter_fn(grid.view(-1), out, group=group)
+        result, off = [], 0
+        for t, c in zip(tensors, sizes):
+            result.append(out.narrow(0, off, max(0, min(c, t.numel() - rank * c))))
+            off += c
+        return result
+
+    plain_wait = pp.AllGatherCoalescedHandle.wait
+
+    def wait(self, handle_dependency=True):
+        if self.complete:
+            return
+        base = self.partitions[0]._base if self.partitions else None
+        if (self.quantization or self.use_secondary_tensor or base is None
+                or not get_accelerator().is_synchronized_device()):
+            return plain_wait(self, handle_dependency)
+        self.allgather_handle.wait()
+        size = self.partitions[0].numel()
+        grid = base.view(-1)[:size * self.world_size].view(self.world_size, size)
+        off = 0
+        for param in self.params:
+            s = param.ds_tensor.ds_numel
+            # rank-major shards of this parameter, then drop the padding
+            param.data = grid[:, off:off + s].reshape(-1)[:param.ds_numel].view(param.ds_shape).to(param.ds_tensor.dtype)
+            param.ds_status = pp.ZeroParamStatus.AVAILABLE
+            off += s
+        self.complete = True
+
+    cc.reduce_scatter_coalesced = stage3.reduce_scatter_coalesced = reduce_scatter_coalesced
+    pp.AllGatherCoalescedHandle.wait = wait
+
+
 def log(rank, **kw):
     if rank == 0:
         print(json.dumps(kw), flush=True)
@@ -154,6 +217,12 @@ def main():
     p.add_argument("--loss-chunk", type=int, default=0,
                    help="tokens per chunk of a fused lm_head + cross-entropy (0: transformers' own, which holds "
                         "the [tokens, vocab] float32 logits and their gradients: ~3 GB at seq 2048, vocab 128k)")
+    p.add_argument("--layers", type=int, default=None, help="override the model's layer count (memory probes)")
+    p.add_argument("--zero-init", action="store_true",
+                   help="ZeRO-3: build the model partitioned (transformers' _from_config under zero.Init); "
+                        "otherwise every rank first builds the whole model, ~1.3x its fp32 size")
+    p.add_argument("--fast-zero", action="store_true",
+                   help="ZeRO-3 reduce-scatter and allgather bookkeeping without per-rank Python loops (fast_zero3)")
     a = p.parse_args()
 
     if a.flush_denormal:
@@ -194,9 +263,13 @@ def main():
     }
     if a.profile:
         cfg["comms_logger"] = {"enabled": True, "verbose": False, "prof_all": True}
+    if a.fast_zero:
+        fast_zero3()
     t0 = time.perf_counter()
     torch.manual_seed(0)
     spec = dict(MODELS[a.model])
+    if a.layers:
+        spec["n_layer" if spec.get("arch") == "gpt2" else "num_hidden_layers"] = a.layers
     if spec.pop("arch", "llama") == "gpt2":
         if a.dropout is not None:
             spec.update(resid_pdrop=a.dropout, embd_pdrop=a.dropout, attn_pdrop=a.dropout)
@@ -206,7 +279,20 @@ def main():
     # With ZeRO-3, transformers builds the model partitioned and gathers each parameter for its
     # own initialisation (std 0.02); the object must stay alive until the model exists.
     hf_ds = HfDeepSpeedConfig(cfg) if a.zero == 3 else None  # noqa: F841
-    model = model_cls(mcfg)
+    if a.zero_init and a.zero == 3:
+        model = model_cls._from_config(mcfg)
+        # transformers' _init_weights ran on parameters zero.Init had already partitioned (empty), so
+        # they kept torch's defaults (an N(0, 1) embedding gave GPT-2 a step-0 loss of ~700). Run it
+        # again per module on the gathered parameters; rank 0's values are broadcast.
+        with torch.no_grad():
+            for m in model.modules():
+                own = list(m.parameters(recurse=False))
+                if own:
+                    with deepspeed.zero.GatheredParameters(own, modifier_rank=0):
+                        if rank == 0:
+                            model._init_weights(m)
+    else:
+        model = model_cls(mcfg)
     if a.checkpointing:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     if a.loss_chunk:
@@ -220,7 +306,7 @@ def main():
     dev = engine.device
     h2h_record_initial(engine)
     log(rank, event="setup", model=a.model, params=nparams, world=world, dtype=a.dtype, zero=a.zero,
-        micro_batch=a.micro_batch, seq=a.seq, backend=a.backend, low_mem=a.low_mem, loss_chunk=a.loss_chunk, threads=torch.get_num_threads(),
+        micro_batch=a.micro_batch, seq=a.seq, backend=a.backend, low_mem=a.low_mem, loss_chunk=a.loss_chunk, layers=a.layers, zero_init=a.zero_init, fast_zero=a.fast_zero, threads=torch.get_num_threads(),
         t_import_s=round(t_import, 2), t_process_group_s=round(t_pg, 2), t_model_s=round(t_model, 2))
 
     gen = torch.Generator().manual_seed(1 + rank)

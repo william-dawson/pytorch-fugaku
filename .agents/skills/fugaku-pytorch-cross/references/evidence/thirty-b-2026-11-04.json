@@ -1,0 +1,195 @@
+{
+ "date": "2026-11-04",
+ "description": "30B (legacy SIF shape) on the container: ZeRO-3 probes, tensor parallel x FSDP2 probes, one-rank-per-node collective benchmark, fast ZeRO-3 A/B. Values as logged; see references/thirty-b.md.",
+ "legacy": {
+  "script": "30b_pp8_tp6_dp12_outer.sh",
+  "nodes": 576,
+  "layout": "1x48",
+  "tp": 6,
+  "pp": 8,
+  "dp": 12,
+  "global_batch": 1536,
+  "seq": 2048,
+  "iter_s": [
+   870,
+   923
+  ],
+  "tflops_per_node": [
+   1.38,
+   1.46
+  ],
+  "jobs": "29716987-29757867"
+ },
+ "zero3_probes": [
+  {
+   "job": 53584326,
+   "layout": "4x12",
+   "layers": 4,
+   "nodes": 32,
+   "result": "OOM step 0 backward"
+  },
+  {
+   "job": 53584338,
+   "layout": "4x12",
+   "layers": 8,
+   "nodes": 32,
+   "result": "timeout, 1.4 GB free"
+  },
+  {
+   "job": 53587234,
+   "layout": "2x24",
+   "layers": 4,
+   "nodes": 32,
+   "result": "OOM"
+  },
+  {
+   "job": 53587246,
+   "layout": "2x24",
+   "layers": 8,
+   "nodes": 32,
+   "result": "OOM",
+   "peak_rank_gb": 13.65
+  },
+  {
+   "job": 53587253,
+   "layout": "1x48",
+   "layers": 4,
+   "nodes": 32,
+   "step_s": 109.0,
+   "peak_rank_gb": 15.37
+  },
+  {
+   "job": 53587257,
+   "layout": "1x48",
+   "layers": 8,
+   "nodes": 32,
+   "step_s": 211.5,
+   "peak_rank_gb": 15.83
+  }
+ ],
+ "tp_fsdp_probes": [
+  {
+   "job": 53587159,
+   "layers": 4,
+   "nodes": 32,
+   "step_s": 27.85,
+   "tflops_per_node": 1.369,
+   "peak_rank_gb": 4.94,
+   "backend": "staged,staged"
+  },
+  {
+   "job": 53587170,
+   "layers": 8,
+   "nodes": 32,
+   "step_s": 52.94,
+   "tflops_per_node": 1.279,
+   "peak_rank_gb": 6.11,
+   "backend": "staged,staged"
+  },
+  {
+   "job": 53589768,
+   "layers": 8,
+   "nodes": 64,
+   "step_s": 51.56,
+   "peak_rank_gb": 6.05
+  },
+  {
+   "job": 53589763,
+   "layers": 8,
+   "nodes": 32,
+   "peak_rank_gb": 6.12,
+   "env": "MALLOC_MMAP_THRESHOLD_=1048576"
+  },
+  {
+   "job": 53590349,
+   "layers": 8,
+   "nodes": 32,
+   "step_s": 42.37,
+   "census_gb": {
+    "param": 0.154,
+    "optim": 0.307,
+    "rss_between_steps": 6.0
+   },
+   "peak_rank_gb": 6.13
+  },
+  {
+   "job": 53590898,
+   "layers": 8,
+   "nodes": 32,
+   "step_s": 48.36,
+   "env": "MIMALLOC_PURGE_DELAY=0",
+   "census_gb": {
+    "param": 0.154,
+    "optim": 0.307,
+    "rss_between_steps": 1.23
+   },
+   "peak_rank_gb": 4.12
+  }
+ ],
+ "algo_ab": {
+  "job": 53591331,
+  "layers": 8,
+  "nodes": 32,
+  "steps_s": {
+   "staged,staged": 49.668,
+   "ring,staged": 44.651,
+   "ring,ring": 42.182
+  },
+  "losses_identical": true
+ },
+ "split4_bench_573MB": {
+  "job": 53589753,
+  "rs": {
+   "ring": 0.3819,
+   "a2a": 0.7152,
+   "staged": 0.8216,
+   "rsb": 1.6702
+  },
+  "ag": {
+   "ring": 0.3506,
+   "persist": 0.35,
+   "ag": 0.4245,
+   "staged": 0.4318
+  }
+ },
+ "one_x48_bench_573MB": {
+  "job": 53589759,
+  "rs": {
+   "ring": 3.7501,
+   "a2a": 0.1449,
+   "staged": 8.28,
+   "rsb": 1.4556
+  },
+  "ag": {
+   "ring": 0.1775,
+   "persist": 0.1318,
+   "ag": 0.1758,
+   "staged": 0.2247
+  }
+ },
+ "fast_zero": {
+  "job": 53585629,
+  "model": "1b",
+  "layout": "4x12",
+  "nodes": 128,
+  "step_s": {
+   "stock": 50.312,
+   "fast": 47.444
+  },
+  "compute_s": {
+   "stock": 42.81,
+   "fast": 39.55
+  },
+  "losses_identical": true
+ },
+ "zero_init_check": {
+  "jobs": [
+   53591157,
+   53591175
+  ],
+  "step0_loss": {
+   "gpt-125m": 10.976,
+   "llama-125m": 9.86
+  }
+ }
+}

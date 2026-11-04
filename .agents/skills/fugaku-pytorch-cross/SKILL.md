@@ -50,6 +50,10 @@ torch_fugaku after this change: the b5879f2 image predates it. See performance.m
 llama_train's `--loss-chunk 256` gives 184 -> 164 tokens/s/node from 16 to 128 nodes, with
 communication at 12-16%. 2x24 and 1x48 lose more with scale (reduce-scatter grows ~4x) and compute
 less per node, but have the memory headroom. `TORCH_FUGAKU_COMM_STATS=2` breaks a step down.
+**For 30B-class models at 4x12** ([references/thirty-b.md](references/thirty-b.md)): ZeRO-3
+cannot fit (the vocabulary embedding's gathered weight, gradient and copies); use `tp_train.py`
+(tensor parallel 4 inside the node x FSDP2 across nodes, `--sp`) with `MIMALLOC_PURGE_DELAY=0`
+(torch's bundled mimalloc otherwise keeps ~5 GB of freed memory per rank).
 
 ## Operational invariants
 

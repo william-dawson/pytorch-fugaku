@@ -9,10 +9,18 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root=$(dirname -- "$here")
 case=${1:?expected container, llvm-port, llvm-sync or llvm-async}
-# CASE%ALGO: that case with TORCH_FUGAKU_RS_ALGO=ALGO (staged, a2a, ring, auto) and the h2h-rsalgo
-# builds of the backend (container: its torch_fugaku first on PYTHONPATH; llvm: fjmpi_port).
+# CASE^: that case with llama_train --fast-zero (ZeRO-3 bookkeeping without per-rank loops).
+if [[ "$case" == *^ ]]; then
+  export H2H_FAST_ZERO=1
+  case=${case%^}
+fi
+# CASE%RS[,AG]: that case with TORCH_FUGAKU_RS_ALGO=RS (staged, a2a, ring, auto), optionally
+# TORCH_FUGAKU_AG_ALGO=AG (staged, ring, auto), and the h2h-rsalgo builds of the backend
+# (container: its torch_fugaku first on PYTHONPATH; llvm: fjmpi_port).
 if [[ "$case" == *%* ]]; then
-  export TORCH_FUGAKU_RS_ALGO=${case##*%} H2H_PORT_PATH=$root/h2h-rsalgo/port
+  algo=${case##*%}
+  export TORCH_FUGAKU_RS_ALGO=${algo%%,*} H2H_PORT_PATH=$root/h2h-rsalgo/port
+  [[ "$algo" == *,* ]] && export TORCH_FUGAKU_AG_ALGO=${algo#*,}
   rs_path=/cross/h2h-rsalgo/container:
   case=${case%\%*}
 fi
@@ -80,6 +88,16 @@ args=(--model "${H2H_MODEL:?}" --seq "${H2H_SEQ:-128}" --micro-batch "${H2H_MB:-
 [[ -n "${H2H_DROPOUT:-}" ]] && args+=(--dropout "$H2H_DROPOUT")
 # H2H_LOSS_CHUNK=N: llama_train's fused chunked lm_head + loss (no [tokens, vocab] logits).
 [[ -n "${H2H_LOSS_CHUNK:-}" ]] && args+=(--loss-chunk "$H2H_LOSS_CHUNK")
+# H2H_LAYERS=N: override the layer count (memory probes); H2H_ZERO_INIT=1: build the model partitioned.
+[[ -n "${H2H_LAYERS:-}" ]] && args+=(--layers "$H2H_LAYERS")
+[[ "${H2H_ZERO_INIT:-0}" == 1 ]] && args+=(--zero-init)
+[[ "${H2H_FAST_ZERO:-0}" == 1 ]] && args+=(--fast-zero)
+# H2H_TRAINER=tp_train.py (run.py): tensor parallel x FSDP2; H2H_TP ranks per tensor-parallel group,
+# H2H_TP_CHECK=1 compares against an unsharded copy (tiny models). llama_train's own flags go too.
+[[ -n "${H2H_TP:-}" ]] && args+=(--tp "$H2H_TP")
+[[ "${H2H_TP_CHECK:-0}" == 1 ]] && args+=(--check)
+[[ "${H2H_TP_SP:-0}" == 1 ]] && args+=(--sp)
+[[ "${H2H_TP_CENSUS:-0}" == 1 ]] && args+=(--census)
 if [[ "$case" == container* ]]; then
   # container-sync / container-async: the image build of fjmpi_async (h2h-async/container),
   # synchronous or with queued, Tofu-offloaded allgathers; plain "container" is the image's fjmpi.

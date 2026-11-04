@@ -8,6 +8,6 @@ rpn=${RPN:?}; nodes=${PJM_NODE:?}
 out="results.${PJM_JOBID}"; mkdir -p "$out"
 export OMP_NUM_THREADS=$((48 / rpn)) OMP_WAIT_POLICY=ACTIVE OMP_PROC_BIND=false
 for v in ${VARIANTS:-a2a_staged a2a rsb ring halving allreduce}; do
-  timeout 420 mpiexec -n $((nodes * rpn)) -std-proc "$out/$v" ./rs_bench $v 5 4194304 50000000
+  timeout 420 mpiexec -n $((nodes * rpn)) -std-proc "$out/$v" ./rs_bench $v 5 ${SIZES:-4194304 50000000}
   echo "$v exit=$?" >> "$out/progress.txt"
 done

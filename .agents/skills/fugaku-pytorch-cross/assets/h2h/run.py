@@ -207,7 +207,11 @@ def step_start(index):
     # Only the ranks whose tables are written: at 512 ranks, building key_averages on every rank
     # pushed 4 x 12 nodes out of memory (job 53581792).
     if profile_steps and index == profile_steps[0] and rank in (0, world - 1):
-        profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU])
+        # H2H_PROFILE_MEMORY=1: also allocations, and a categorized memory timeline (parameters,
+        # gradients, optimizer state, activations, temporaries) in memory.rank<N>.json.
+        mem = os.environ.get('H2H_PROFILE_MEMORY') == '1'
+        profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU],
+                                          profile_memory=mem, record_shapes=mem, with_stack=mem)
         profiler.__enter__()
     step_started[index] = time.perf_counter()
 
@@ -225,7 +229,14 @@ def record_step(index, elapsed, loss):
             ka = profiler.key_averages()
             (output/f'profile.rank{rank}.txt').write_text(
                 ka.table(sort_by='self_cpu_time_total', row_limit=80, max_name_column_width=70) + '\n\n' +
-                ka.table(sort_by='cpu_time_total', row_limit=40, max_name_column_width=70))
+                ka.table(sort_by='cpu_time_total', row_limit=40, max_name_column_width=70) +
+                ('\n\n' + ka.table(sort_by='self_cpu_memory_usage', row_limit=40, max_name_column_width=70)
+                 if os.environ.get('H2H_PROFILE_MEMORY') == '1' else ''))
+            if os.environ.get('H2H_PROFILE_MEMORY') == '1':
+                try:
+                    profiler.export_memory_timeline(str(output/f'memory.rank{rank}.json'), device='cpu')
+                except Exception as e:  # the timeline is best effort
+                    (output/f'memory.rank{rank}.err').write_text(repr(e))
         profiler = None
     steps.append(dict(step=index, wall_s=elapsed, loss=loss, **({'comm': comm_stats.stats()} if comm_stats else {})))
 
@@ -246,7 +257,7 @@ def record_initial(engine):
 
 try:
     audit('before')
-    runpy.run_path(str(Path(__file__).with_name('llama_train.py')), run_name='__main__',
+    runpy.run_path(str(Path(__file__).with_name(os.environ.get('H2H_TRAINER', 'llama_train.py'))), run_name='__main__',
         init_globals={'h2h_record_step':record_step, 'h2h_record_input':record_input, 'h2h_record_initial':record_initial, 'h2h_step_start':step_start})
     (output/f'timing.rank{rank}.json').write_text(json.dumps(dict(variant=variant,backend=backend,world=world,mode=mode,rank=rank,fastdrop=fastdrop,
         steps=steps,phases=phases,input_hashes=input_hashes,window_wall_s=window_end-window_start,peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,

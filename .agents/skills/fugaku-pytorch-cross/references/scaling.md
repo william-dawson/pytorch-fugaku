@@ -59,11 +59,37 @@ per step.
    collapse below 4 ranks per node (performance.md, Fix 5).
    - The `auto` all-to-all already rescued 1 × 48 at 128 nodes: 25.8 s/step, against 595 s with
      the staged path (job 53502948).
-3. **At 4 × 12, communication is not the limit.** It stays at 12-16%. What grows is compute
-   (+3.8 s from 64 to 512 ranks) and skew. A profile at 16 nodes counts about 25,000 `aten::slice`
-   and `aten::narrow` calls per step: per-rank chunking, likely DeepSpeed's. Whether that count
-   grows with ranks is not yet measured.
+3. **At 4 × 12, communication is not the limit.** It stays at 12-16%. What grew was compute
+   (+3.8 s from 64 to 512 ranks): DeepSpeed ZeRO-3's per-rank Python loops (next section).
 4. **Memory is what stops 4 × 12** (next section).
+
+## DeepSpeed ZeRO-3's per-rank loops (`--fast-zero`)
+
+torch.profiler on rank 0 (jobs 53581789, 53582939, 53582912) at 64, 256 and 512 ranks:
+
+| ranks | `aten::slice` calls / 2 steps | `aten::narrow` | slice + narrow + as_strided + cat, self s/step |
+|---:|---:|---:|---:|
+| 64 | 69k | 50k | 0.8 |
+| 256 | 267k | 192k | 2.4 |
+| 512 | 532k | 382k | 4.3 |
+
+`aten::mm` is flat (50.6-51.2 s). Two places loop over ranks for every tensor:
+- `coalesced_collectives.reduce_scatter_coalesced` slices each gradient into world-size chunks
+  and concatenates them interleaved.
+- `AllGatherCoalescedHandle.wait` narrows each gathered parameter world-size times and
+  concatenates again.
+
+At 55k ranks this would cost minutes per step. `llama_train.py --fast-zero` (`fast_zero3()`)
+replaces both with one strided copy per tensor into a `[world, chunk]` buffer of the same layout.
+Results are bit-identical. Benchkit Llama-1B, 4 × 12, 128 nodes, one allocation (job 53585629):
+
+| | step | compute | tokens/s/node |
+|---|---:|---:|---:|
+| stock | 50.31 s | 42.81 s | 162.8 |
+| `--fast-zero` | **47.44 s** | **39.55 s** | **172.7** |
+
+Compute returns to its 16-node value (39.0 s), and 4 × 12 now loses 6% from 16 to 128 nodes
+instead of 11%. Harness: case suffix `^` (`container%auto^`).
 
 ## Memory
 
@@ -84,9 +110,13 @@ per step.
   gradients in the forward, at the same FLOPs. It lowered steady RSS from 6.15 to 5.3 GB per rank,
   and 4 × 12 ran at 16, 32, 64 and 128 nodes. Losses match transformers' to float32 rounding
   (`test_chunked_loss.py`).
-- **Model construction is the tightest moment.** VmHWM is 6.3 GB per rank before
-  `deepspeed.initialize` shards the model, leaving 4.2 GB free on a 4 × 12 node. Building the
-  model already partitioned would remove this.
+- **Model construction is the tightest moment.** `model_cls(config)` builds the whole model on
+  every rank (6.3 GB per rank at 1B, leaving 4.2 GB free on a 4 × 12 node); transformers applies
+  `zero.Init` only in `_from_config`. `llama_train.py --zero-init` builds through `_from_config`
+  (2.1 GB per rank after construction, at 30B width), then re-runs `_init_weights` per module
+  under `GatheredParameters`: under `zero.Init` it runs on already-partitioned, empty
+  parameters, and GPT-2 kept torch's N(0, 1) embedding (step-0 loss ~700 instead of ~10.9; jobs
+  53587253 vs 53591157).
 - **Small node counts.** 4 × 12 at 4 nodes still runs out of memory (larger shards; job 53579562).
 - **The margin is thin.** torch.profiler on every rank at 128 nodes tipped nodes over (job
   53581792). `run.py` now profiles rank 0 and the last rank only.
