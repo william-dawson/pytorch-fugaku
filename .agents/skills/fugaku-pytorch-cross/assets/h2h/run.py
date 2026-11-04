@@ -78,6 +78,11 @@ elif backend == 'fjmpi_async':
 world = int(os.environ['WORLD_SIZE'])
 dist.init_process_group(backend)
 assert dist.get_rank() == rank and dist.get_world_size() == world
+# TORCH_FUGAKU_COMM_STATS=1|2: per-kind collective timers of the fjmpi / fjmpi_port extension.
+if os.environ.get('TORCH_FUGAKU_COMM_STATS', '0') != '0' and backend in ('fjmpi', 'fjmpi_port'):
+    ext = sys.modules.get('torch_fugaku._c10d' if backend == 'fjmpi' else 'fjmpi_port._c10d')
+    if ext is not None and hasattr(ext, 'stats'):
+        comm_stats = ext
 os.environ.update(RANK=str(rank), WORLD_SIZE=str(world), LOCAL_RANK=str(local_rank), LOCAL_SIZE=str(rpn))
 warmup = int(os.environ['H2H_WARMUP'])
 def step_range(name):
@@ -199,7 +204,9 @@ def step_start(index):
             events = comm_stats.trace()  # clears; keep only the traced steps
             if trace_steps[0] < index <= trace_steps[1] + 1 and events:
                 traced.extend(events)
-    if profile_steps and index == profile_steps[0]:
+    # Only the ranks whose tables are written: at 512 ranks, building key_averages on every rank
+    # pushed 4 x 12 nodes out of memory (job 53581792).
+    if profile_steps and index == profile_steps[0] and rank in (0, world - 1):
         profiler = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU])
         profiler.__enter__()
     step_started[index] = time.perf_counter()

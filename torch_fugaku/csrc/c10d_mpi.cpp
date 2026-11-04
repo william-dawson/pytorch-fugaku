@@ -11,12 +11,17 @@
 // Fujitsu MPI's behaviour measured with rs_bench: from 64 ranks the staged all-to-all becomes latency
 // bound (8 MB / ranks per peer), a ring is 4-5x faster at 4 ranks per node, and at fewer ranks per
 // node point-to-point traffic is so slow that one unstaged all-to-all wins.
+//
+// TORCH_FUGAKU_COMM_STATS=1 times every collective by kind (stats() / reset_stats() from Python);
+// =2 also enters an MPI_Barrier first and counts its time apart, as skew: the wait for the last
+// rank to arrive, so the collective's own time is transfer and local work only.
 #include <mpi.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/extension.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +38,45 @@ char *stage_in = nullptr, *stage_out = nullptr;
 enum class RsAlgo { Auto, Staged, A2a, Ring };
 RsAlgo kRsAlgo = RsAlgo::Auto;
 
+enum Kind { kAllgather, kReduceScatter, kAllreduce, kBroadcast, kOther, kKinds };
+const char *kKindNames[kKinds] = {"allgather", "reduce_scatter", "allreduce", "broadcast", "other"};
+struct Stat {
+  uint64_t calls = 0, bytes = 0;
+  double s = 0, skew_s = 0;
+};
+int kCommStats = 0;
+Stat stats[kKinds];
+
+// Scope of one collective call, for TORCH_FUGAKU_COMM_STATS.
+class Timed {
+ public:
+  Timed(Kind k, size_t bytes, MPI_Comm comm) : k_(k) {
+    if (!kCommStats) return;
+    if (kCommStats >= 2) {
+      std::lock_guard<std::mutex> lock(mpi_mutex);
+      const double t = MPI_Wtime();
+      MPI_Barrier(comm);
+      stats[k].skew_s += MPI_Wtime() - t;
+    }
+    stats[k].calls++;
+    stats[k].bytes += bytes;
+    t0_ = MPI_Wtime();
+  }
+  ~Timed() {
+    if (kCommStats) stats[k_].s += MPI_Wtime() - t0_;
+  }
+
+ private:
+  Kind k_;
+  double t0_ = 0;
+};
+
+size_t nbytes(const std::vector<at::Tensor> &ts) {
+  size_t n = 0;
+  for (const auto &t : ts) n += t.nbytes();
+  return n;
+}
+
 void check(int rc, const char *what) {
   if (rc != MPI_SUCCESS) {
     char msg[MPI_MAX_ERROR_STRING];
@@ -47,6 +91,7 @@ void ensure_init() {
   MPI_Initialized(&ok);
   if (!ok) check(MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SERIALIZED, &provided), "MPI_Init_thread");
   if (const char *mb = std::getenv("TORCH_FUGAKU_STAGE_MB")) kStage = std::strtoull(mb, nullptr, 10) << 20;
+  if (const char *c = std::getenv("TORCH_FUGAKU_COMM_STATS")) kCommStats = std::atoi(c);
   if (const char *a = std::getenv("TORCH_FUGAKU_RS_ALGO")) {
     const std::string v = a;
     TORCH_CHECK(v == "auto" || v == "staged" || v == "a2a" || v == "ring",
@@ -174,18 +219,21 @@ class FjMpiBackend : public c10d::Backend {
 
   c10::intrusive_ptr<c10d::Work> allreduce(std::vector<at::Tensor> &tensors,
                                            const c10d::AllreduceOptions &opts) override {
+    Timed timed(kAllreduce, nbytes(tensors), comm_);
     for (auto &t : tensors) reduce_all(t, opts.reduceOp);
     return done(tensors);
   }
 
   c10::intrusive_ptr<c10d::Work> allreduce_coalesced(std::vector<at::Tensor> &tensors,
                                                      const c10d::AllreduceCoalescedOptions &opts) override {
+    Timed timed(kAllreduce, nbytes(tensors), comm_);
     for (auto &t : tensors) reduce_all(t, opts.reduceOp);
     return done(tensors);
   }
 
   c10::intrusive_ptr<c10d::Work> broadcast(std::vector<at::Tensor> &tensors,
                                            const c10d::BroadcastOptions &opts) override {
+    Timed timed(kBroadcast, nbytes(tensors), comm_);
     std::lock_guard<std::mutex> lock(mpi_mutex);
     const int root = static_cast<int>(opts.rootRank);
     for (auto &t : tensors) {
@@ -209,12 +257,14 @@ class FjMpiBackend : public c10d::Backend {
 
   c10::intrusive_ptr<c10d::Work> reduce(std::vector<at::Tensor> &tensors,
                                         const c10d::ReduceOptions &opts) override {
+    Timed timed(kOther, nbytes(tensors), comm_);
     for (auto &t : tensors) reduce_to(t, opts.reduceOp, static_cast<int>(opts.rootRank));
     return done(tensors);
   }
 
   c10::intrusive_ptr<c10d::Work> _allgather_base(at::Tensor &out, at::Tensor &in,
                                                  const c10d::AllgatherOptions &) override {
+    Timed timed(kAllgather, out.nbytes(), comm_);
     gather_all(out, in);
     return done({out});
   }
@@ -223,6 +273,7 @@ class FjMpiBackend : public c10d::Backend {
                                                                  std::vector<at::Tensor> &ins,
                                                                  const c10d::AllgatherOptions &) override {
     TORCH_CHECK(outs.size() == ins.size(), "fjmpi: allgather_into_tensor_coalesced size mismatch");
+    Timed timed(kAllgather, nbytes(outs), comm_);
     for (size_t i = 0; i < ins.size(); ++i) gather_all(outs[i], ins[i]);
     return done(outs);
   }
@@ -231,6 +282,7 @@ class FjMpiBackend : public c10d::Backend {
                                            std::vector<at::Tensor> &ins,
                                            const c10d::AllgatherOptions &) override {
     TORCH_CHECK(outs.size() == ins.size(), "fjmpi: allgather size mismatch");
+    Timed timed(kAllgather, nbytes(ins) * size_, comm_);
     std::vector<at::Tensor> flat_outs;
     for (size_t i = 0; i < ins.size(); ++i) {
       TORCH_CHECK(static_cast<int>(outs[i].size()) == size_, "fjmpi: allgather needs one output per rank");
@@ -245,6 +297,7 @@ class FjMpiBackend : public c10d::Backend {
 
   c10::intrusive_ptr<c10d::Work> _reduce_scatter_base(at::Tensor &out, at::Tensor &in,
                                                       const c10d::ReduceScatterOptions &opts) override {
+    Timed timed(kReduceScatter, in.nbytes(), comm_);
     scatter_reduce(out, in, opts.reduceOp);
     return done({out});
   }
@@ -253,6 +306,7 @@ class FjMpiBackend : public c10d::Backend {
                                                                  std::vector<at::Tensor> &ins,
                                                                  const c10d::ReduceScatterOptions &opts) override {
     TORCH_CHECK(outs.size() == ins.size(), "fjmpi: reduce_scatter_tensor_coalesced size mismatch");
+    Timed timed(kReduceScatter, nbytes(ins), comm_);
     for (size_t i = 0; i < ins.size(); ++i) scatter_reduce(outs[i], ins[i], opts.reduceOp);
     return done(outs);
   }
@@ -261,6 +315,7 @@ class FjMpiBackend : public c10d::Backend {
                                                 std::vector<std::vector<at::Tensor>> &ins,
                                                 const c10d::ReduceScatterOptions &opts) override {
     TORCH_CHECK(outs.size() == ins.size(), "fjmpi: reduce_scatter size mismatch");
+    Timed timed(kReduceScatter, nbytes(outs) * size_, comm_);
     for (size_t i = 0; i < outs.size(); ++i) {
       TORCH_CHECK(static_cast<int>(ins[i].size()) == size_, "fjmpi: reduce_scatter needs one input per rank");
       std::vector<at::Tensor> parts;
@@ -277,6 +332,7 @@ class FjMpiBackend : public c10d::Backend {
                                                std::vector<int64_t> &out_splits,
                                                std::vector<int64_t> &in_splits,
                                                const c10d::AllToAllOptions &) override {
+    Timed timed(kOther, in.nbytes(), comm_);
     check_tensor(out);
     check_tensor(in);
     std::lock_guard<std::mutex> lock(mpi_mutex);
@@ -320,6 +376,7 @@ class FjMpiBackend : public c10d::Backend {
   }
 
   c10::intrusive_ptr<c10d::Work> barrier(const c10d::BarrierOptions &) override {
+    Timed timed(kOther, 0, comm_);
     std::lock_guard<std::mutex> lock(mpi_mutex);
     check(MPI_Barrier(comm_), "MPI_Barrier");
     return done({});
@@ -543,4 +600,19 @@ PYBIND11_MODULE(_c10d, m) {
   m.def("create", &create, py::arg("store"), py::arg("rank"), py::arg("size"), py::arg("global_ranks"),
         py::arg("group_id"), py::call_guard<py::gil_scoped_release>());
   m.def("finalize", &finalize, py::call_guard<py::gil_scoped_release>());
+  m.def("stats", [] {  // TORCH_FUGAKU_COMM_STATS: per kind since the last reset_stats()
+    py::dict d;
+    for (int k = 0; k < kKinds; ++k) {
+      py::dict e;
+      e["calls"] = stats[k].calls;
+      e["bytes"] = stats[k].bytes;
+      e["s"] = stats[k].s;
+      e["skew_s"] = stats[k].skew_s;
+      d[kKindNames[k]] = e;
+    }
+    return d;
+  });
+  m.def("reset_stats", [] {
+    for (auto &st : stats) st = Stat();
+  });
 }

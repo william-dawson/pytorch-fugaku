@@ -46,6 +46,10 @@ benchkit Llama-1B fits 4x12 only at 12 and 16 nodes, 239 and 225 tokens/s/node).
 From 64 ranks, the fjmpi backends pick their reduce-scatter (`TORCH_FUGAKU_RS_ALGO=auto`): ring at
 4 ranks/node (-8% to -13% step time at 16 nodes), one all-to-all at 2 ranks/node (-1.4%). This needs
 torch_fugaku after this change: the b5879f2 image predates it. See performance.md, Fix 5.
+**To scale, use the container** ([references/scaling.md](references/scaling.md)): 4x12 with
+llama_train's `--loss-chunk 256` gives 184 -> 164 tokens/s/node from 16 to 128 nodes, with
+communication at 12-16%. 2x24 and 1x48 lose more with scale (reduce-scatter grows ~4x) and compute
+less per node, but have the memory headroom. `TORCH_FUGAKU_COMM_STATS=2` breaks a step down.
 
 ## Operational invariants
 

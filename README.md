@@ -65,9 +65,12 @@ It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
   calls collectives itself (DeepSpeed's ZeRO, FSDP):
   `init_process_group("fjmpi")`. All-reduce, broadcast, reduce, all-gather,
   reduce-scatter, all-to-all, barrier and subgroups, on CPU tensors.
-  Reduce-scatter runs as an all-to-all and a local sum: Fujitsu MPI's own is
-  several times slower. `TORCH_FUGAKU_STAGE_MB` sets the staging buffers
-  (default 8; 0 sends tensors directly).
+  Reduce-scatter picks its algorithm (`TORCH_FUGAKU_RS_ALGO`, default `auto`):
+  a staged all-to-all and local sum below 64 ranks, a ring at 4+ ranks per
+  node, one unstaged all-to-all otherwise. Fujitsu MPI's own is several times
+  slower. `TORCH_FUGAKU_STAGE_MB` sets the staging buffers (default 8; 0 sends
+  tensors directly). `TORCH_FUGAKU_COMM_STATS=1` times collectives by kind
+  (`torch_fugaku._c10d.stats()`); `=2` adds a barrier first to separate skew.
 - **Settings**: oneDNN off, `OMP_WAIT_POLICY=ACTIVE`.
 
 The same, explicitly (with `TORCH_FUGAKU=0`):

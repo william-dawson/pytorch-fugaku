@@ -283,6 +283,7 @@ which VmRSS does not count. See large-pages.md.
 - 8+ node 1B, longer runs, and mimalloc at 125M (not needed there, not yet shown harmless).
 - Why wide ranks (2 × 24, 1 × 48) make every collective cost about 1.4 s.
 - Why reductions collapse at 2 ranks per node (Fix 5), and why the a2a gain at 2 × 24 is small in training.
+- Container scaling across layouts, memory and communication: [scaling.md](scaling.md).
 - The mechanism of ProcessGroupMPI's stalls (fix 2 avoids it rather than explaining it).
 - Communication is still exposed: 30% of a 125M step and about half of a 1B step is spent blocked
   in allgather and reduce-scatter. See [overlap.md](overlap.md).

@@ -43,9 +43,15 @@ The directory is expected at `$WORK/h2h-scale` (`rank.sh` binds `$WORK` into the
   `H2H_ZERO` stage (default 3; 0 for plain data parallel). Set `#PJM --mpi max-proc-per-node` to match.
   `H2H_DROPOUT` (gpt-* models), `H2H_THREADS`, `H2H_WAIT_POLICY` (diagnostics), and
   `H2H_FASTDROP=<libfastdrop.so>` (load the fast dropout kernel, LLVM only; see ../fastdrop).
+  `H2H_LOSS_CHUNK=256`: llama_train's fused chunked lm_head + cross-entropy (`--loss-chunk`), which
+  never holds the [tokens, vocab] logits; needed for 4 × 12 at seq 2048 (see references/scaling.md).
+  `TORCH_FUGAKU_COMM_STATS=1|2`: per-kind collective time (and with 2, barrier skew) per step in
+  `timing.rank<N>.json`, for fjmpi and fjmpi_port.
 - `llama_train.py`: Llama-architecture DeepSpeed ZeRO-3 trainer on synthetic tokens (models `llama-125m`, `1b`, ...).
 - `summarize.py`: steady step time, losses and blocked time per case. Edit its job list.
 - `compare_profiles.py`: self-CPU per operator, container vs LLVM, from two `profile.rank<N>.txt`.
+- `scale_summary.py`: step breakdown (compute, skew, allgather, reduce-scatter, GB moved, RSS) per run of a `TORCH_FUGAKU_COMM_STATS=2` sweep.
+- `test_chunked_loss.py`: llama_train's `ChunkedLMLoss` against lm_head + `F.cross_entropy` (loss, both gradients).
 - `analyze_trace.py`: per-gather slack, queueing, blocking and drains from one `trace.rank<N>.json`.
 
 ## Job

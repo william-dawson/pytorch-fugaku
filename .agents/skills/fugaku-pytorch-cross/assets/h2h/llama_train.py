@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import time
+import types
 
 T_START = time.perf_counter()
 
@@ -79,6 +80,53 @@ def register_causal_sdpa():
     AttentionMaskInterface.register("sdpa_causal", sdpa_mask)
 
 
+class ChunkedLMLoss(torch.autograd.Function):
+    """Mean cross-entropy of h @ w.T against y (-100: ignored) without the [tokens, vocab] logits:
+    chunks of `chunk` tokens, gradients computed in the forward (as Liger's fused linear
+    cross-entropy), so the backward only scales them. Same FLOPs as the plain lm_head + loss."""
+
+    @staticmethod
+    def forward(ctx, h, w, y, chunk):
+        valid = y != -100
+        n = valid.sum().clamp(min=1).to(torch.float32)
+        gh, gw = torch.empty_like(h), torch.zeros(w.shape, dtype=torch.float32)
+        total = torch.zeros((), dtype=torch.float32)
+        for s in range(0, h.shape[0], chunk):
+            hc, yc, vc = h[s:s + chunk], y[s:s + chunk].clamp(min=0), valid[s:s + chunk]
+            logits = (hc @ w.t()).float()
+            lse = torch.logsumexp(logits, 1)
+            total += ((lse - logits.gather(1, yc[:, None])[:, 0]) * vc).sum()
+            p = logits.sub_(lse[:, None]).exp_()  # softmax, in place
+            p[torch.arange(p.shape[0]), yc] -= vc.float()
+            p.mul_(vc[:, None])
+            gh[s:s + chunk] = p.to(w.dtype) @ w
+            gw.addmm_(p.t(), hc.float())
+        ctx.save_for_backward(gh.div_(n), gw.div_(n).to(w.dtype))
+        return total / n
+
+    @staticmethod
+    def backward(ctx, g):
+        gh, gw = ctx.saved_tensors
+        return gh.mul_(g), gw.mul_(g), None, None
+
+
+def chunked_lm_loss(model, chunk):
+    """model(input_ids=, labels=).loss through ChunkedLMLoss. lm_head is still called as a module
+    (once per step), so ZeRO-3 gathers and frees its weight as before."""
+    head = model.lm_head
+
+    def head_loss(self, h, y):
+        return ChunkedLMLoss.apply(h.reshape(-1, h.shape[-1]), self.weight, y.reshape(-1), chunk)
+
+    def forward(self, input_ids=None, labels=None, **kw):
+        h = self.base_model(input_ids=input_ids).last_hidden_state
+        y = torch.cat([labels[:, 1:], labels.new_full((labels.shape[0], 1), -100)], 1)  # next token
+        return types.SimpleNamespace(loss=self.lm_head(h, y))
+
+    head.forward = types.MethodType(head_loss, head)
+    model.forward = types.MethodType(forward, model)
+
+
 def log(rank, **kw):
     if rank == 0:
         print(json.dumps(kw), flush=True)
@@ -103,6 +151,9 @@ def main():
                    help="gpt-* dropout (transformers' default 0.1, as Megatron); torch's CPU bernoulli_ is scalar on aarch64")
     p.add_argument("--low-mem", action="store_true",
                    help="ZeRO-3 buffers sized for 8 GB per rank (DeepSpeed's defaults keep 1e9 parameters live)")
+    p.add_argument("--loss-chunk", type=int, default=0,
+                   help="tokens per chunk of a fused lm_head + cross-entropy (0: transformers' own, which holds "
+                        "the [tokens, vocab] float32 logits and their gradients: ~3 GB at seq 2048, vocab 128k)")
     a = p.parse_args()
 
     if a.flush_denormal:
@@ -158,6 +209,8 @@ def main():
     model = model_cls(mcfg)
     if a.checkpointing:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    if a.loss_chunk:
+        chunked_lm_loss(model, a.loss_chunk)
     nparams = sum(getattr(x, "ds_numel", x.numel()) for x in model.parameters())
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.1, betas=(0.9, 0.95), fused=True)
     memlog("model built")
@@ -167,7 +220,7 @@ def main():
     dev = engine.device
     h2h_record_initial(engine)
     log(rank, event="setup", model=a.model, params=nparams, world=world, dtype=a.dtype, zero=a.zero,
-        micro_batch=a.micro_batch, seq=a.seq, backend=a.backend, low_mem=a.low_mem, threads=torch.get_num_threads(),
+        micro_batch=a.micro_batch, seq=a.seq, backend=a.backend, low_mem=a.low_mem, loss_chunk=a.loss_chunk, threads=torch.get_num_threads(),
         t_import_s=round(t_import, 2), t_process_group_s=round(t_pg, 2), t_model_s=round(t_model, 2))
 
     gen = torch.Generator().manual_seed(1 + rank)

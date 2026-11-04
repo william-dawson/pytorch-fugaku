@@ -78,6 +78,8 @@ args=(--model "${H2H_MODEL:?}" --seq "${H2H_SEQ:-128}" --micro-batch "${H2H_MB:-
   --warmup "${H2H_WARMUP:?}" --attn sdpa_causal --checkpointing --low-mem)
 # gpt-* models only: llama_train's --dropout (transformers' default 0.1, as Megatron).
 [[ -n "${H2H_DROPOUT:-}" ]] && args+=(--dropout "$H2H_DROPOUT")
+# H2H_LOSS_CHUNK=N: llama_train's fused chunked lm_head + loss (no [tokens, vocab] logits).
+[[ -n "${H2H_LOSS_CHUNK:-}" ]] && args+=(--loss-chunk "$H2H_LOSS_CHUNK")
 if [[ "$case" == container* ]]; then
   # container-sync / container-async: the image build of fjmpi_async (h2h-async/container),
   # synchronous or with queued, Tofu-offloaded allgathers; plain "container" is the image's fjmpi.
