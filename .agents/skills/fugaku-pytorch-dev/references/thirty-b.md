@@ -135,12 +135,29 @@ there; experiments.md), `TORCH_FUGAKU_COMM_STATS=1`, steady steps 1-3.
 - **First step:** 1314 s at 256 nodes, and 1563 s at 576 nodes for the job's first case. The
   second case in the same 576-node allocation took 328 s, so this is a cold start (caches).
 
+## On the CI image alone (d7fb755), 256 nodes (jobs 53608203, 53608204)
+
+Two jobs started at the same time, on different nodes. The second also ran `llio_transfer` on
+the SIF first. Each job ran `auto` (the cold launch), then ring reduce-scatter + direct
+`MPI_Allgather`:
+
+| job | `auto` first step | `auto` steady | ring + direct steady |
+|---|---:|---:|---:|
+| 53608203 | 227 s (first forward 70 s) | **221.9 s (9.23 tokens/s/node, 1.64 TFLOPs)** | 278.2 s |
+| 53608204, `llio_transfer` | 1398 s (first forward 1195 s) | 263.9 s | 282.8 s |
+
+- **Ring + direct loses in both allocations.** `auto` keeps rings for both collectives.
+- **`llio_transfer` returned in 0 s.** The SIF is on `/vol0402`, while the job's cache volume is
+  `/vol0004`, so it was probably a no-op.
+- **The cold first step depends on the allocation, not on the image or file loading.** The same
+  image, at the same moment, on other nodes, had none. Next: per-rank first-forward timing, to
+  find the late ranks.
+
 ## Open
 
-- Overlap FSDP's collectives with compute (needs asynchronous collectives in fjmpi): 28-46% of
+- Overlap FSDP's collectives with compute (needs asynchronous collectives in fjmpi): 22-46% of
   the step.
-- Ring reduce-scatter + direct allgather at 576 nodes (allgather 77 → 68 s seen).
-- Cold-start first step: `llio_transfer` of the Python tree.
+- Cold first step in some allocations: find the late ranks.
 - `--sp`'s time cost against plain tensor parallel.
 - The global batch is one sequence per tensor-parallel group per step (64 at 256 nodes). Matching
   the legacy 1536 needs gradient accumulation, or more nodes.

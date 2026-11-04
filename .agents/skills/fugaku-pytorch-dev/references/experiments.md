@@ -55,7 +55,7 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 | TCPStore rendezvous stops at 1012 clients: rank 0 hits the 1024 open-file soft limit (jobs 53593695 at 256 nodes, 53593699 at 576, both "1012/N clients joined"); `pf-run` raises it to the hard limit (262144) | this page | image (`fugaku/pf-run`) |
 | With the limit raised, 12 of 1024 ranks still loop on "Connection reset by peer" and the store never completes (job 53597324; at 2304 workers torch warns `somaxconn` is 2048, job 53597327). `init_method="fjmpi://"` gives each process a local `HashStore` with rank/size from the launcher; fjmpi needs only MPI, and torch does not barrier on the store when creating groups (`TORCH_DIST_INIT_BARRIER=0`) | this page | image (`torch_fugaku.register_backend`) |
 | Why `ulimit -n` in `pf-run` did not help (still 1012/N, jobs 53597324, 53597327): PJM caps open files per process with the `proc-openfd` resource (default 1024, max 1048576; `#PJM -L "proc-openfd=N"`); `somaxconn` (2048) is node-wide and not settable per job, so `env://` beyond it also needs staggered connects (per Fugaku support documentation, relayed in session) | this page | documented |
-| First step at 128 nodes: forward 892 s vs 103 s at 64; at 576 nodes the second case in one allocation started in 328 s vs 1563 s, so it is a cold start. Hypothesis: the lazy-import metadata storm (~600 modules per process; RIKEN reports `llio_transfer` cut PyTorch start-up 6x at 1536 processes); the `site310` overlay is on the shared filesystem | thirty-b.md | open: test `llio_transfer` |
+| First step at 128 nodes: forward 892 s vs 103 s at 64; at 576 nodes the second case in one allocation started in 328 s vs 1563 s. On the CI image alone at 256 nodes, two simultaneous allocations: first forward 70 s in one, 1195 s in the other (which ran `llio_transfer`, in 0 s, probably a no-op). So it depends on the allocation, not on the image or imports | thirty-b.md | open: find the late ranks |
 
 ## Overlap
 
@@ -82,8 +82,22 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 | Tensor parallel 4 in the node × FSDP2 (`torch_fugaku.parallel`), sequence parallel, vocab-parallel loss: matches an unsharded copy to 1.6e-7 | thirty-b.md | opt-in (`examples/tp_train.py`) |
 | Full 30B at 4 × 12: 6.0 / 5.7 / 7.6 / **6.6** tokens/s/node at 64 / 128 / 256 / 576 nodes (legacy SIF: ~6.0 at 576); compute 194.5 s/step everywhere, communication 28-46% | thirty-b.md "Full 48-layer runs" | measured |
 | On a 576-node torus, a2a reduce-scatter + direct `MPI_Allgather` (the microbenchmark winners) were 470 s vs 312 s for rings in training | thirty-b.md | `auto` keeps rings |
+| Ring reduce-scatter + direct `MPI_Allgather` at 256 nodes: 278.2 vs 221.9 s and 282.8 vs 263.9 s against rings, in two allocations | thirty-b.md (jobs 53608203, 53608204) | dead end |
+| Full 30B on the CI image alone at 256 nodes: 9.23 tokens/s/node (221.9 s/step, 1.64 TFLOPs/node) | thirty-b.md (job 53608203) | measured |
 | First step at 128 nodes: forward 892 s vs 103 s at 64 (one-off; later steps normal) | thirty-b.md | open |
 | Communication 43% of the 64-node step; ~1.3 GB/s per node average, far below Tofu | thirty-b.md | open |
+
+## Image verification
+
+| Image | Check on Fugaku | Result |
+|---|---|---|
+| CI build d7fb755 (bundled DeepSpeed 0.19.8, transformers 4.57.6), image alone through the repository's `pf-setup`/`pf-run`, 2 nodes × 4 ranks (job 53607603) | `test_nn`; `test_backend_mpi` with `auto` and rings forced; `examples/tp_train.py --check --sp`; `examples/llama_train.py` ZeRO-3 over `fjmpi://` | all pass. 1.6e-7 against the unsharded copy; ZeRO-3 patch active without a flag; GPT-125M 4.58 s/step on 2 nodes |
+
+| benchkit omnilearned (RIKEN-RCCS/benchkit `programs/omnilearned`), the October run directories rerun unchanged, normal mode, `BK_OMNILEARNED_SIF` the only difference, same allocation (jobs 53616203, 53616204) | events/s at 1 / 4 nodes: ed93ef4 17.0 / 55.3, **d7fb755 17.8 / 58.0** (README: 15.9 / 58.4); best losses 9.40150 / 9.56419 vs 9.40150 / 9.56420 | reproduces; current image ~5% faster |
+| SIF reproducibility: `singularity pull` of the same OCI digest (`sha-ed93ef4`, `sha256:26d5947a…`) twice | same size (2,983,251,968 B), different SHA-256 (`ba657626…` in October, `47b102f0…` on 2026-11-05) | the OCI digest identifies an image; a SIF hash identifies one file |
+
+Note: after `import deepspeed`, the import hooks have fired and removed themselves; check
+`torch_fugaku.deepspeed._state`, not `sys.meta_path`.
 
 ## Where things are
 
