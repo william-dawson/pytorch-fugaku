@@ -12,7 +12,7 @@ This is the container's backend compiled against the LLVM wheel. Its source is t
 to what was built.
 
 ```sh
-cp torch_fugaku/csrc/c10d_mpi.cpp .agents/skills/fugaku-pytorch-cross/assets/backends/fjmpi_port/
+cp torch_fugaku/csrc/c10d_mpi.cpp .agents/skills/fugaku-pytorch-dev/assets/backends/fjmpi_port/
 # copy the directory to $WORK/h2h-profile/port (build.sh takes WORK as ../..), then on a login node:
 bash -lc 'bash build.sh'      # login shell: build.sh calls `module load`
 ```

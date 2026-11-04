@@ -76,7 +76,8 @@ elif backend == 'fjmpi_async':
     if os.environ.get('H2H_PROGRESS_HOOKS') == '1' and hasattr(fjmpi_async, 'install_progress_hooks'):
         fjmpi_async.install_progress_hooks()
 world = int(os.environ['WORLD_SIZE'])
-dist.init_process_group(backend)
+# fjmpi:// (torch_fugaku, container): no TCP rendezvous; env:// failed from ~1000 ranks.
+dist.init_process_group(backend, init_method="fjmpi://" if backend == "fjmpi" and os.environ.get("H2H_TCP_RENDEZVOUS") != "1" else None)
 assert dist.get_rank() == rank and dist.get_world_size() == world
 # TORCH_FUGAKU_COMM_STATS=1|2: per-kind collective timers of the fjmpi / fjmpi_port extension.
 if os.environ.get('TORCH_FUGAKU_COMM_STATS', '0') != '0' and backend in ('fjmpi', 'fjmpi_port'):

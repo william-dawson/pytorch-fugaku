@@ -4,17 +4,22 @@
 # (put first on PYTHONPATH; the image's other libraries are copied from its own install).
 set -euo pipefail
 W=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross
-singularity exec -B $W:/cross $W/pytorch-fugaku-b5879f2.sif bash -c '
+SINGULARITYENV_OVERLAY=${OVERLAY:-container} singularity exec -B $W:/cross $W/pytorch-fugaku-b5879f2.sif bash -c '
   set -euo pipefail
   SITE=$(python -c "import site; print(site.getsitepackages()[0])")
-  rm -rf /cross/h2h-rsalgo/container && mkdir -p /cross/h2h-rsalgo/container
-  cp -r "$SITE/torch_fugaku" /cross/h2h-rsalgo/container/
+  rm -rf /cross/h2h-rsalgo/${OVERLAY:-container} && mkdir -p /cross/h2h-rsalgo/${OVERLAY:-container}
+  cp -r "$SITE/torch_fugaku" /cross/h2h-rsalgo/${OVERLAY:-container}/
+  cp /cross/h2h-rsalgo/pkg/*.py /cross/h2h-rsalgo/${OVERLAY:-container}/torch_fugaku/  # the repository Python modules
   TL=$(python -c "import torch, os; print(os.path.dirname(torch.__file__))")
   ABI=$(python -c "import torch; print(int(torch.compiled_with_cxx11_abi()))")
   PYINC=$(python -c "import sysconfig; print(sysconfig.get_paths()[\"include\"])")
   g++ -O2 /cross/h2h-rsalgo/c10d_mpi.cpp -std=c++17 -shared -fPIC -D_GLIBCXX_USE_CXX11_ABI=$ABI \
     -I"$TL/include" -I"$TL/include/torch/csrc/api/include" -L"$TL/lib" -ltorch -ltorch_cpu -lc10 \
     -Wl,-rpath,"$TL/lib" -I"$PYINC" -I/opt/openmpi/include -ltorch_python -L/opt/openmpi/lib -lmpi \
-    -o /cross/h2h-rsalgo/container/torch_fugaku/_c10d.so
-  ls -la /cross/h2h-rsalgo/container/torch_fugaku/'
+    -o /cross/h2h-rsalgo/${OVERLAY:-container}/torch_fugaku/_c10d.so
+  # The image may predate kernels the repository package loads (bernoulli: after b5879f2).
+  g++ -O3 -fopenmp /cross/h2h-rsalgo/bernoulli.cpp -std=c++17 -shared -fPIC -D_GLIBCXX_USE_CXX11_ABI=$ABI \
+    -I"$TL/include" -I"$TL/include/torch/csrc/api/include" -L"$TL/lib" -ltorch -ltorch_cpu -lc10 \
+    -Wl,-rpath,"$TL/lib" -o /cross/h2h-rsalgo/${OVERLAY:-container}/torch_fugaku/lib/libtorch_fugaku_bernoulli.so
+  ls -la /cross/h2h-rsalgo/${OVERLAY:-container}/torch_fugaku/'
 echo BUILT

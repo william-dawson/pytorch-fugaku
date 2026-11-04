@@ -4,7 +4,7 @@
 # reduce bucket with --low-mem is 5e7). VARIANTS: a subset, or the allgathers (ag_*).
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$here"
-rpn=${RPN:?}; nodes=${PJM_NODE:?}
+rpn=${RPN:?}; n=${PJM_NODE:?}; nodes=$(( ${n//x/*} ))  # a shaped job (node=4x6x4:torus) may give PJM_NODE as XxYxZ
 out="results.${PJM_JOBID}"; mkdir -p "$out"
 export OMP_NUM_THREADS=$((48 / rpn)) OMP_WAIT_POLICY=ACTIVE OMP_PROC_BIND=false
 for v in ${VARIANTS:-a2a_staged a2a rsb ring halving allreduce}; do

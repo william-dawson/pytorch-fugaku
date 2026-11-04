@@ -27,7 +27,7 @@ while [[ -n "${todo// /}" ]]; do
   cp -L "$path" "$HL/$so"
   todo="$todo $(readelf -dW "$path" | awk -F'[][]' '/NEEDED/ {print $2}' | tr '\n' ' ')"
 done
-NODES=${PJM_NODE:-1}
+NODES=${PJM_NODE:-1}; NODES=$(( ${NODES//x/*} ))  # a shaped job (node=4x6x4:torus) may give XxYxZ
 if (( NODES > 1 )); then
   IFN=tofu1; ADDR=$(ip -o -4 addr show dev tofu1 | awk '{split($4, a, "/"); print a[1]; exit}')
 else

@@ -8,6 +8,8 @@ Imported from ``torch_fugaku.pth`` at interpreter start; does nothing until
 - the MPI comm hook on every DDP model          TORCH_FUGAKU_MPI=auto|1|0
   ("auto": when an MPI launcher started the process, i.e. PMIX_RANK or
   OMPI_COMM_WORLD_RANK is set, and WORLD_SIZE > 1)
+- DeepSpeed ZeRO-3 without per-rank loops,      TORCH_FUGAKU_FAST_ZERO=1|0
+  when deepspeed.runtime.zero.stage3 is first imported (torch_fugaku.deepspeed)
 """
 import importlib.abc
 import importlib.machinery
@@ -24,6 +26,9 @@ def _apply(torch):
     launched = any(v in os.environ for v in ("PMIX_RANK", "OMPI_COMM_WORLD_RANK"))
     if mpi == "1" or (mpi == "auto" and launched and int(os.environ.get("WORLD_SIZE", "1")) > 1):
         torch_fugaku._hook_every_ddp()
+    import torch_fugaku.deepspeed
+
+    torch_fugaku.deepspeed.install()
 
 
 class _AfterTorchImport(importlib.abc.MetaPathFinder):

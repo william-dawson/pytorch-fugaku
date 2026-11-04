@@ -72,8 +72,8 @@ In the container's torch 2.11 (stock aarch64 wheel), the CPU allocator uses a bu
 | default | 6.0 GB | 6.13 GB | 42.4 s (53590349) |
 | `MIMALLOC_PURGE_DELAY=0` | **1.23 GB** | **4.12 GB** | 48.4 s (53590898, other allocation) |
 
-The step-time cost of purging (more first-touch page faults) is not yet measured within one
-allocation.
+Within one allocation (job 53596798, `--sp`): 50.9 → 54.6 s per step (+7%), peak 5.77 → 3.76 GB,
+identical losses. So it is opt-in, for memory-tight runs, not an image default.
 
 ## Communication: FSDP's groups have one rank per node
 
@@ -111,6 +111,6 @@ memory per node (with `H2H_MEMSAMPLE=1`).
 ## Open
 
 - The full 48-layer run (64 and 128 nodes) is in progress; numbers to follow.
-- Purge cost within one allocation. `--sp`'s time cost against plain tensor parallel.
+- `--sp`'s time cost against plain tensor parallel.
 - The global batch is one sequence per tensor-parallel group per step (64 at 256 nodes). Matching
   the legacy 1536 needs gradient accumulation, or more nodes.

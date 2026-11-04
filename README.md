@@ -48,6 +48,12 @@ Also:
 - `-L freq=2000,eco_state=0` selects normal mode, in which matrix
   multiplications run ~1.4x faster than in the default boost-eco mode.
 
+**Agent skills.** [`fugaku-pytorch`](.agents/skills/fugaku-pytorch/SKILL.md) covers training well with
+the image: which layout and parallel route for which model size, job scripts, settings, and
+expected throughput and memory. [`fugaku-pytorch-dev`](.agents/skills/fugaku-pytorch-dev/SKILL.md)
+is the developer record: every experiment and dead end behind the image, the benchmark harness,
+and the LLVM source-build route.
+
 ## What torch_fugaku does
 
 It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
@@ -72,7 +78,18 @@ It applies itself when torch is imported (`TORCH_FUGAKU=1` in the image):
   slower. `TORCH_FUGAKU_STAGE_MB` sets the staging buffers (default 8; 0 sends
   tensors directly). `TORCH_FUGAKU_COMM_STATS=1` times collectives by kind
   (`torch_fugaku._c10d.stats()`); `=2` adds a barrier first to separate skew.
-- **Settings**: oneDNN off, `OMP_WAIT_POLICY=ACTIVE`.
+- **DeepSpeed ZeRO-3 without per-rank Python loops** (`torch_fugaku.deepspeed`), applied when
+  ZeRO-3 is imported: DeepSpeed's coalesced reduce-scatter and all-gather bookkeeping cost
+  O(ranks × tensors) per step (4.3 s at 512 ranks for a 1B model); the patch is one strided copy
+  per tensor, with bit-identical results.
+- **Settings**: oneDNN off, `OMP_WAIT_POLICY=ACTIVE`. When memory is tight, set
+  `MIMALLOC_PURGE_DELAY=0`: torch's CPU allocator is a bundled mimalloc whose arenas otherwise keep
+  gigabytes of freed memory (peak 5.8 → 3.8 GB per rank, at ~7% speed).
+
+For large models, two opt-in modules: `torch_fugaku.nn.chunked_lm_loss(model)` (a causal-LM loss
+that never holds the [tokens, vocab] logits) and `torch_fugaku.parallel` (tensor parallel inside
+the node × FSDP2 across nodes for Llama). `examples/` has a DeepSpeed ZeRO-3 trainer and a
+tensor-parallel one; see "Large models".
 
 The same, explicitly (with `TORCH_FUGAKU=0`):
 
@@ -85,7 +102,8 @@ torch_fugaku.status()              # what is active
 ```
 
 Switches: `TORCH_FUGAKU_KERNELS=0`, `TORCH_FUGAKU_ONEDNN=1`,
-`TORCH_FUGAKU_MPI=0|1|auto` (auto: on when mpiexec started the process).
+`TORCH_FUGAKU_MPI=0|1|auto` (auto: on when mpiexec started the process),
+`TORCH_FUGAKU_FAST_ZERO=0`.
 
 ## Running DeepSpeed
 
@@ -96,8 +114,12 @@ ZeRO (and FSDP) call `torch.distributed` collectives directly, so point DeepSpee
 import torch_fugaku
 torch_fugaku.register_backend()
 import deepspeed
-deepspeed.init_distributed(dist_backend="fjmpi")
+deepspeed.init_distributed(dist_backend="fjmpi", init_method="fjmpi://")
 ```
+
+`init_method="fjmpi://"` takes rank and size from the MPI launcher, with no TCP rendezvous. The
+default `env://` makes rank 0 serve one socket per rank, which failed on Fugaku from about 1000
+ranks.
 
 On the CPU accelerator (`DS_ACCELERATOR=cpu`), DeepSpeed JIT-compiles a shared-memory comm op
 with `ninja`/`gcc` the first time it's used; point `TORCH_EXTENSIONS_DIR` at a writable path
@@ -154,6 +176,23 @@ to 9.8 s per step. Its random stream differs from the stock wheel's, so losses a
 bit-identical to runs without torch_fugaku.
 | `X . W^T`, 2048x8192 by (2048x8192)^T (Llama `down_proj`) | 170 GF/s | 696 GF/s |
 
+## Large models
+
+Benchkit Llama-1B (DeepSpeed ZeRO-3, seq 2048), tokens/s per node:
+
+| nodes | 1 × 48 | 2 × 24 | 4 × 12 |
+|---:|---:|---:|---:|
+| 16 | 97 | 129 | 184 |
+| 128 | 79 | 108 | 173 |
+
+At 4 × 12 (one rank per CMG), it needs `--loss-chunk` (`torch_fugaku.nn`) to fit.
+
+A 30B model (the Fugaku-LLM Megatron SIF's GPT-30B shape) does not fit ZeRO-3 at 4 ranks per
+node. With tensor parallel 4 inside each node × FSDP2 across nodes (`examples/tp_train.py`), it
+trains at 6.0 tokens/s per node on 64 nodes and 5.7 on 128. The legacy Megatron SIF does about
+6 on 576 nodes. Details, including memory and what limits scaling, are in the `fugaku-pytorch`
+skill.
+
 ## Fujitsu's linear algebra (optional)
 
 `PF_FJBLAS=1` runs each rank on Fujitsu's OpenMP runtime, with thread binding off (it would put
@@ -183,19 +222,15 @@ The fresh source build explicitly disables PyTorch’s AArch64 mimalloc override
 links Fugaku’s large-page library, and supplies a linked non-PIE Python runner.
 Two-node tests verified actual 2 MiB tensor pages and seven asynchronous MPI
 cases, with application `LD_PRELOAD` and `LD_LIBRARY_PATH` cleared. See the
-[large-page build and validation notes](.agents/skills/fugaku-pytorch-cross/references/large-pages.md).
+[large-page build and validation notes](.agents/skills/fugaku-pytorch-dev/references/large-pages.md).
 
-**The head-to-head (H2H) comparison with the existing container/`torch_fugaku`
-approach is still in progress.** These functional tests and GEMM measurements
-do not establish end-to-end training performance or a preferred route. The
-first instrumented 151M-model comparison reached 43.0 tokens/s for the fresh
-cross-build versus 439.9 for the container (two nodes, 4 ranks × 12 threads per
-node); the old cross-build was variable and this is not an established rebuild
-speedup. Plain and reversed-order comparisons remain under review. The
-model-training results elsewhere in this README describe the container approach;
-they are not results for the new cross-compiled wheel.
+**Against the container**, the cross-build reaches the container's speed, and beats it by
+5-25% on small DeepSpeed runs, but only with run-time fixes (LLIO cache size, the container's
+backend, a preloaded allocator). It runs well only at 4 ranks per node, and at 32-128 nodes it was
+slower than the container (146 vs 175 and 126 vs 164 tokens/s/node for Llama-1B). The container is
+the recommended route; the developer skill has the comparisons.
 
-The [Fugaku PyTorch cross-compilation skill](.agents/skills/fugaku-pytorch-cross/SKILL.md)
+The [developer skill](.agents/skills/fugaku-pytorch-dev/SKILL.md)
 contains pinned inputs, the build scripts and patches, a fresh-workspace
 reproduction procedure, troubleshooting, and recorded two-node C++/Python and
 asynchronous MPI tests. It also records 1/2/4-rank GEMM results and remaining
@@ -205,8 +240,9 @@ are not stored in this repository.
 ## Build and update
 
 `Dockerfile` builds on any arm64 Linux host. CI builds it on GitHub's arm64
-runner, tests it (kernel accuracy against FP64, `bmm` and its gradients, a
-2-rank DDP step over MPI) and pushes it. To move to a new PyTorch, change
+runner, tests it (kernel accuracy against FP64, `bmm` and its gradients, the chunked loss, a
+2-rank DDP step over MPI, the `fjmpi` backend on 2 and 4 ranks with default and ring algorithms,
+and tensor parallel × FSDP2 against an unsharded copy) and pushes it. To move to a new PyTorch, change
 `TORCH_VERSION` in the `Dockerfile`.
 
 ## Licenses

@@ -39,3 +39,4 @@ ENV PATH=/opt/openmpi/bin:$PATH \
     PYTHONNOUSERSITE=1
 COPY tests /opt/pytorch-fugaku/tests
 COPY tools /opt/pytorch-fugaku/tools
+COPY examples /opt/pytorch-fugaku/examples

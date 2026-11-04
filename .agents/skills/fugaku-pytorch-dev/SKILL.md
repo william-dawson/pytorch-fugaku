@@ -1,13 +1,20 @@
 ---
-name: fugaku-pytorch-cross
-description: Cross-compile and validate PyTorch for Fugaku A64FX using LLVM, Fujitsu MPI, threaded BLAS/LAPACK and Python bindings. Use for reproducing this source-build route or diagnosing its build/runtime failures.
+name: fugaku-pytorch-dev
+description: Developer record for PyTorch on Fugaku A64FX - every experiment, measurement and dead end behind the pytorch-fugaku image (layouts, collectives, allocators, ZeRO-3, tensor parallel x FSDP2, 30B), the h2h benchmark harness and collective microbenchmarks, and the LLVM source-build route. Use when changing the image or torch_fugaku, re-measuring, or diagnosing why something is the way it is. For simply training with the image, use fugaku-pytorch.
 ---
 
-# LLVM cross-compilation of PyTorch for Fugaku
+# PyTorch on Fugaku: developer record
 
-Use this for the repository's LLVM source-build route. The existing container,
-`torch_fugaku` extension and its `fjmpi` backend are separate implementations.
-This route builds PyTorch's own `torch.distributed` backend named **`mpi`**.
+Two things live here:
+
+1. **The record of what was tried** for the pytorch-fugaku image and why it is configured the way
+   it is: [references/experiments.md](references/experiments.md) is the index (findings, dead
+   ends, job IDs). The user-facing summary is the `fugaku-pytorch` skill.
+2. **The LLVM source-build route** (below): PyTorch cross-compiled with LLVM and Fujitsu MPI.
+   The container, `torch_fugaku` and its `fjmpi` backend are separate implementations; this
+   route builds PyTorch's own `torch.distributed` backend named **`mpi`**.
+
+## LLVM cross-compilation
 
 The validated baseline is PyTorch **2.11.0**, LLVM **22.1.0**, Fujitsu TCS/DSP
 **1.2.43**, A64FX/SVE512, LP64 threaded `fjlapackexsve`, Fujitsu OpenMP, and

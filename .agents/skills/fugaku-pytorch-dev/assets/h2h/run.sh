@@ -12,7 +12,7 @@ export PF_HOSTLIB="$here/.pf-hostlib.${PJM_JOBID}"
 bash "$here/../h2h-paired/pf/pf-setup" "${H2H_RPN:-4}"
 set -a; source "$PF_HOSTLIB/pf.env"; set +a
 export H2H_MODE=resources
-{ env | grep -E '^(PJM_LLIO_CN_CACHE_SIZE|PJM_NODE|WORLD_SIZE|H2H_)' | sort; } > "$suite/env.txt"
+{ env | grep -E '^(PJM_|WORLD_SIZE|H2H_|TORCH_FUGAKU_|MIMALLOC_)' | sort; } > "$suite/env.txt"
 failed=0
 for case in ${H2H_CASES:?}; do
   export H2H_OUTPUT_REL="$suite/$case" H2H_OUTPUT="$here/$suite/$case"

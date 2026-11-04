@@ -19,6 +19,11 @@ Three things, each through a public PyTorch interface:
   (``Backend.register_backend``), for frameworks that call collectives
   directly (DeepSpeed's ZeRO): ``init_process_group("fjmpi")``.
 
+Submodules for large-model training (see the fugaku-pytorch skill):
+``torch_fugaku.deepspeed`` (ZeRO-3 without per-rank Python loops; automatic in
+the image), ``torch_fugaku.nn`` (``chunked_lm_loss``: no [tokens, vocab]
+logits) and ``torch_fugaku.parallel`` (tensor parallel x FSDP2 for Llama).
+
 ``enable()`` applies the first two and registers the backend; ``ddp(model)`` wraps a model in DDP with
 the MPI hook. In the pytorch-fugaku image both happen on ``import torch``
 (``TORCH_FUGAKU=1``), so unmodified scripts get them; see ``_autoload``.
@@ -78,16 +83,38 @@ def _create_backend(opts, pg_options):
                           list(opts.global_ranks_in_group), str(opts.group_id))
 
 
-def register_backend():
-    """Register ``"fjmpi"`` with torch.distributed. Idempotent; MPI starts with the first group.
+def _mpi_rendezvous(url, timeout=None, **kwargs):
+    """``init_method="fjmpi://"``: a process-local store, rank and size from the MPI launcher.
 
-    Ranks must be MPI_COMM_WORLD ranks (mpiexec + pf-run); a mismatch is an error.
+    The fjmpi backend communicates through MPI only, and torch.distributed does not barrier on
+    the store when it creates groups (TORCH_DIST_INIT_BARRIER=0), so no rank-0 TCP server is
+    needed. With env:// on Fugaku, rank 0's TCPStore failed at 1024+ ranks: the open-file limit
+    (1012 clients joined), then connection resets beyond the listen backlog.
+    """
+    import torch.distributed as dist
+
+    env = os.environ
+    rank = int(env.get("RANK", env.get("PMIX_RANK", env.get("OMPI_COMM_WORLD_RANK", "0"))))
+    size = int(env.get("WORLD_SIZE", env.get("OMPI_COMM_WORLD_SIZE", "1")))
+    yield dist.HashStore(), rank, size
+
+
+def register_backend():
+    """Register ``"fjmpi"`` with torch.distributed, and the ``fjmpi://`` rendezvous for it.
+    Idempotent; MPI starts with the first group.
+
+    Ranks must be MPI_COMM_WORLD ranks (mpiexec + pf-run); a mismatch is an error. Prefer
+    ``init_process_group("fjmpi", init_method="fjmpi://")``: no TCP rendezvous, at any size.
     """
     import torch.distributed as dist
 
     if _state["backend"] or not dist.is_available():
         return
     dist.Backend.register_backend("fjmpi", _create_backend, extended_api=True, devices=["cpu"])
+    # (torch.distributed.rendezvous the attribute is a function; import from the module)
+    from torch.distributed.rendezvous import register_rendezvous_handler
+
+    register_rendezvous_handler("fjmpi", _mpi_rendezvous)
     _state["backend"] = True
 
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fugaku PyTorch developer record"
+  short_description: "Experiments behind the image; LLVM PyTorch build"
+  default_prompt: "Use $fugaku-pytorch-dev to reproduce the LLVM PyTorch build and validate its MPI-enabled Python wheel on Fugaku."

@@ -30,4 +30,7 @@ if [[ "${PF_FJBLAS:-0}" == 1 ]]; then
   # off; with it off the threads spread over the CMG. torch_fugaku then routes GEMMs to it.
   ENV+=(--env OMP_PROC_BIND=false --env TORCH_FUGAKU_FJBLAS=1)
 fi
+# Rank 0 serves the TCPStore rendezvous with one socket per rank: at the default soft limit
+# of 1024 open files, jobs above ~1000 ranks time out with "1012/N clients joined".
+ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
 exec singularity exec -B "$B" "${ENV[@]}" "$SIF" "$@"

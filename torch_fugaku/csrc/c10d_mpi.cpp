@@ -8,7 +8,7 @@
 // allocator keeps presenting new ones. TORCH_FUGAKU_STAGE_MB=0 sends the tensors themselves.
 //
 // Reduce-scatter and allgather pick their algorithms (TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring,
-// TORCH_FUGAKU_AG_ALGO=auto|staged|ring; default auto) from Fujitsu MPI's behaviour measured with
+// TORCH_FUGAKU_AG_ALGO=auto|staged|direct|ring; default auto) from Fujitsu MPI's behaviour measured with
 // rs_bench. What matters is how many ranks the whole job runs per node:
 // - 4+ (one per CMG): a ring reduce-scatter is 2-5x faster than the staged all-to-all, in the world
 //   group and in sub-groups with one rank per node (tensor parallel x FSDP's data-parallel groups).
@@ -41,7 +41,7 @@ std::mutex mpi_mutex;               // MPI_THREAD_SERIALIZED: one caller at a ti
 char *stage_in = nullptr, *stage_out = nullptr;
 enum class RsAlgo { Auto, Staged, A2a, Ring };
 RsAlgo kRsAlgo = RsAlgo::Auto;
-enum class AgAlgo { Auto, Staged, Ring };
+enum class AgAlgo { Auto, Staged, Direct, Ring };
 AgAlgo kAgAlgo = AgAlgo::Auto;
 int kJobNodeRanks = 0;  // ranks per node in MPI_COMM_WORLD
 
@@ -107,8 +107,9 @@ void ensure_init() {
   }
   if (const char *a = std::getenv("TORCH_FUGAKU_AG_ALGO")) {
     const std::string v = a;
-    TORCH_CHECK(v == "auto" || v == "staged" || v == "ring", "fjmpi: TORCH_FUGAKU_AG_ALGO must be auto, staged or ring, not ", v);
-    kAgAlgo = v == "staged" ? AgAlgo::Staged : v == "ring" ? AgAlgo::Ring : AgAlgo::Auto;
+    TORCH_CHECK(v == "auto" || v == "staged" || v == "direct" || v == "ring",
+                "fjmpi: TORCH_FUGAKU_AG_ALGO must be auto, staged, direct or ring, not ", v);
+    kAgAlgo = v == "staged" ? AgAlgo::Staged : v == "direct" ? AgAlgo::Direct : v == "ring" ? AgAlgo::Ring : AgAlgo::Auto;
   }
   if (const char *a = std::getenv("TORCH_FUGAKU_RS_ALGO")) {
     const std::string v = a;
@@ -223,7 +224,7 @@ class FjMpiBackend : public c10d::Backend {
     int world_rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     if (world_rank == 0) {  // once per group world rank 0 belongs to
-      const char *rs[] = {"auto", "staged", "a2a", "ring"}, *ag[] = {"auto", "staged", "ring"};
+      const char *rs[] = {"auto", "staged", "a2a", "ring"}, *ag[] = {"auto", "staged", "direct", "ring"};
       std::fprintf(stderr, "fjmpi: group of %d ranks, %d per node (job: %d per node): reduce_scatter %s, allgather %s\n",
                    size, node_ranks, kJobNodeRanks, rs[static_cast<int>(rs_algo_)], ag[static_cast<int>(ag_algo_)]);
     }
@@ -479,7 +480,7 @@ class FjMpiBackend : public c10d::Backend {
       ring_gather(src, dst, n);
       return;
     }
-    if (kStage == 0) {
+    if (kStage == 0 || ag_algo_ == AgAlgo::Direct) {  // one MPI_Allgather on the tensors themselves
       TORCH_CHECK(n <= kMaxCount, "fjmpi: allgather block too large for one MPI call");
       check(MPI_Allgather(src, static_cast<int>(n), MPI_BYTE, dst, static_cast<int>(n), MPI_BYTE, comm_),
             "MPI_Allgather");

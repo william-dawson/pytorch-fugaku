@@ -21,7 +21,7 @@ if [[ "$case" == *%* ]]; then
   algo=${case##*%}
   export TORCH_FUGAKU_RS_ALGO=${algo%%,*} H2H_PORT_PATH=$root/h2h-rsalgo/port
   [[ "$algo" == *,* ]] && export TORCH_FUGAKU_AG_ALGO=${algo#*,}
-  rs_path=/cross/h2h-rsalgo/container:
+  rs_path=/cross/h2h-rsalgo/${H2H_OVERLAY:-container}:
   case=${case%\%*}
 fi
 # llvm-*+PRESET: libmpg (the LLVM python's malloc) settings; at 1B the LLVM build took ~30x the
@@ -46,6 +46,8 @@ if [[ "$case" == *+* ]]; then
     plainpy-arena2) export H2H_PYTHON=/vol0402/data/ra000009/u10035/miniconda3/bin/python3.11 MALLOC_ARENA_MAX=2 ;;
     # mi*: mimalloc preloaded into the python process only (h2h-alloc); a preloaded malloc wins
     # over libmpg's, and covers posix_memalign (torch's tensors). keep: never return memory.
+    # mipurge0: torch's bundled mimalloc (container) returns freed memory at once.
+    mipurge0) export MIMALLOC_PURGE_DELAY=0 ;;
     mi) export H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 ;;
     # mi-nodecommit: mimalloc purges by resetting pages instead of decommitting them.
     mi-nodecommit) export H2H_LD_PRELOAD=/vol0402/data/ra000009/u10035/agent/work/pytorch-llvm-cross/h2h-alloc/build/libmimalloc.so.2.2 MIMALLOC_PURGE_DECOMMITS=0 ;;
@@ -66,7 +68,7 @@ export PYTHONNOUSERSITE=1 DS_ACCELERATOR=cpu
 rpn=${H2H_RPN:-4}
 # H2H_THREADS: fewer OpenMP threads than the rank's cores (e.g. to leave cores for MPI helpers).
 export OMP_NUM_THREADS=${H2H_THREADS:-$((48 / rpn))} OMP_DYNAMIC=FALSE OMP_PROC_BIND=false OMP_WAIT_POLICY=${H2H_WAIT_POLICY:-ACTIVE} OPENBLAS_NUM_THREADS=1
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false MEMLOG=1 NNODES=${PJM_NODE:?}
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false MEMLOG=1 NNODES=$(( ${PJM_NODE//x/*} ))
 rank=${PMIX_RANK:?}
 out=${H2H_OUTPUT:?}
 # H2H_MEMSAMPLE=1: one sampler per node (its first rank): node MemAvailable and every training

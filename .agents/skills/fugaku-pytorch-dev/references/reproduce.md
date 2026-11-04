@@ -29,7 +29,7 @@ fetch NCCL just to obtain Eigen. SLEEF is the **bundled 3.8.0**, not the older
 From the repository root, after authorizing the network activity:
 
 ```sh
-SKILL="$PWD/.agents/skills/fugaku-pytorch-cross"
+SKILL="$PWD/.agents/skills/fugaku-pytorch-dev"
 python3 "$SKILL/scripts/fetch-inputs.py" /path/to/input-cache
 ```
 
