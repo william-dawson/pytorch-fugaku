@@ -35,7 +35,7 @@ if os.environ['H2H_VARIANT'] == 'llvm':
     assert os.environ.get('LD_PRELOAD', '') == os.environ.get('H2H_LD_PRELOAD', '')
     assert not any(os.environ.get(k) for k in ('LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH'))
     sys.path[:0] = [str(fresh/'wheel-install'), str(fresh/'runtime-site'),
-                   str(Path(__file__).resolve().parent.parent/'h2h-profile/port'),
+                   os.environ.get('H2H_PORT_PATH', str(Path(__file__).resolve().parent.parent/'h2h-profile/port')),
                    os.environ.get('H2H_ASYNC_PATH', str(Path(__file__).resolve().parent.parent/'h2h-async/backend')),
                    str(Path(__file__).resolve().parent.parent/'h2h-tiny/site')]
 
@@ -51,7 +51,11 @@ if os.environ['H2H_VARIANT'] == 'llvm':
 
 variant = os.environ['H2H_VARIANT']
 mode = os.environ['H2H_MODE']
-backend = os.environ.get('H2H_BACKEND', 'fjmpi_port') if variant == 'llvm' else 'fjmpi'
+# The container uses the image's fjmpi, or (H2H_CONTAINER_BACKEND=fjmpi_async, with H2H_ASYNC_PATH
+# the image build of h2h-async/container) the overlapping backend built inside the image.
+backend = os.environ.get('H2H_BACKEND', 'fjmpi_port') if variant == 'llvm' else os.environ.get('H2H_CONTAINER_BACKEND', 'fjmpi')
+if variant == 'container' and os.environ.get('H2H_ASYNC_PATH'):
+    sys.path.insert(0, os.environ['H2H_ASYNC_PATH'])
 assert backend in ('fjmpi', 'fjmpi_port', 'fjmpi_async'), backend
 assert torch.__version__ == ('2.11.0+fugaku.llvm' if variant == 'llvm' else '2.11.0+cu130')
 assert torch.get_num_threads() == int(os.environ.get('OMP_NUM_THREADS', per_rank))
@@ -68,6 +72,9 @@ elif backend == 'fjmpi_async':
     import fjmpi_async
     fjmpi_async.register_backend()
     comm_stats = fjmpi_async
+    # H2H_PROGRESS_HOOKS=1: drive queued gathers from module forward hooks (no progress thread).
+    if os.environ.get('H2H_PROGRESS_HOOKS') == '1' and hasattr(fjmpi_async, 'install_progress_hooks'):
+        fjmpi_async.install_progress_hooks()
 world = int(os.environ['WORLD_SIZE'])
 dist.init_process_group(backend)
 assert dist.get_rank() == rank and dist.get_world_size() == world

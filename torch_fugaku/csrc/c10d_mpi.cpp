@@ -6,16 +6,23 @@
 // Data moves through two reused staging buffers (TORCH_FUGAKU_STAGE_MB each, default 8):
 // without Fujitsu's large pages, Tofu registers every new buffer it sends, and torch's
 // allocator keeps presenting new ones. TORCH_FUGAKU_STAGE_MB=0 sends the tensors themselves.
+//
+// Reduce-scatter picks its algorithm (TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring, default auto) from
+// Fujitsu MPI's behaviour measured with rs_bench: from 64 ranks the staged all-to-all becomes latency
+// bound (8 MB / ranks per peer), a ring is 4-5x faster at 4 ranks per node, and at fewer ranks per
+// node point-to-point traffic is so slow that one unstaged all-to-all wins.
 #include <mpi.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/extension.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <mutex>
+#include <string>
 
 namespace {
 
@@ -23,6 +30,8 @@ size_t kStage = 8 << 20;            // bytes per staging buffer; 0: no staging
 constexpr size_t kMaxCount = 1 << 30;  // MPI counts are int: direct calls go in pieces
 std::mutex mpi_mutex;               // MPI_THREAD_SERIALIZED: one caller at a time
 char *stage_in = nullptr, *stage_out = nullptr;
+enum class RsAlgo { Auto, Staged, A2a, Ring };
+RsAlgo kRsAlgo = RsAlgo::Auto;
 
 void check(int rc, const char *what) {
   if (rc != MPI_SUCCESS) {
@@ -38,6 +47,12 @@ void ensure_init() {
   MPI_Initialized(&ok);
   if (!ok) check(MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SERIALIZED, &provided), "MPI_Init_thread");
   if (const char *mb = std::getenv("TORCH_FUGAKU_STAGE_MB")) kStage = std::strtoull(mb, nullptr, 10) << 20;
+  if (const char *a = std::getenv("TORCH_FUGAKU_RS_ALGO")) {
+    const std::string v = a;
+    TORCH_CHECK(v == "auto" || v == "staged" || v == "a2a" || v == "ring",
+                "fjmpi: TORCH_FUGAKU_RS_ALGO must be auto, staged, a2a or ring, not ", v);
+    kRsAlgo = v == "staged" ? RsAlgo::Staged : v == "a2a" ? RsAlgo::A2a : v == "ring" ? RsAlgo::Ring : RsAlgo::Auto;
+  }
   if (!stage_in && kStage > 0) {
     TORCH_CHECK(posix_memalign(reinterpret_cast<void **>(&stage_in), 1 << 21, kStage) == 0 &&
                     posix_memalign(reinterpret_cast<void **>(&stage_out), 1 << 21, kStage) == 0,
@@ -131,6 +146,22 @@ class FjMpiBackend : public c10d::Backend {
     MPI_Comm_size(comm_, &s);
     TORCH_CHECK(r == rank && s == size, "fjmpi: MPI rank/size ", r, "/", s, " != process group rank/size ",
                 rank, "/", size, "; launch with mpiexec and take RANK from it (pf-run does)");
+    MPI_Comm node;
+    int node_ranks = 1;
+    check(MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node), "MPI_Comm_split_type");
+    MPI_Comm_size(node, &node_ranks);
+    MPI_Comm_free(&node);
+    rs_algo_ = kRsAlgo;
+    if (rs_algo_ == RsAlgo::Auto)
+      rs_algo_ = size < 64 ? RsAlgo::Staged : node_ranks >= 4 ? RsAlgo::Ring : RsAlgo::A2a;
+    if (kStage == 0 && rs_algo_ == RsAlgo::Staged) rs_algo_ = RsAlgo::A2a;
+    static bool told = false;
+    if (rank == 0 && !told) {
+      told = true;
+      const char *names[] = {"auto", "staged", "a2a", "ring"};
+      std::fprintf(stderr, "fjmpi: reduce_scatter uses %s (%d ranks, %d per node)\n",
+                   names[static_cast<int>(rs_algo_)], size, node_ranks);
+    }
   }
 
   ~FjMpiBackend() override {
@@ -296,6 +327,7 @@ class FjMpiBackend : public c10d::Backend {
 
  private:
   MPI_Comm comm_ = MPI_COMM_NULL;
+  RsAlgo rs_algo_ = RsAlgo::Staged;
 
   void reduce_all(at::Tensor &t, const c10d::ReduceOp &op) {
     check_tensor(t);
@@ -399,6 +431,14 @@ class FjMpiBackend : public c10d::Backend {
     const bool local = out.scalar_type() != at::kBool &&
                        (kind == c10d::ReduceOp::SUM || kind == c10d::ReduceOp::AVG || kind == c10d::ReduceOp::MAX ||
                         kind == c10d::ReduceOp::MIN || kind == c10d::ReduceOp::PRODUCT);
+    auto combine = [&](at::Tensor o, const at::Tensor &a, const at::Tensor &b) {  // o = a (op) b
+      switch (kind) {
+        case c10d::ReduceOp::MAX: at::maximum_out(o, a, b); break;
+        case c10d::ReduceOp::MIN: at::minimum_out(o, a, b); break;
+        case c10d::ReduceOp::PRODUCT: at::mul_out(o, a, b); break;
+        default: at::add_out(o, a, b); break;
+      }
+    };
     auto reduce_blocks = [&](at::Tensor blocks, at::Tensor o) {  // blocks: [size, cnt] -> o: [cnt]
       switch (kind) {
         case c10d::ReduceOp::MAX: at::amax_out(o, blocks, {0}); break;
@@ -415,7 +455,10 @@ class FjMpiBackend : public c10d::Backend {
       const size_t es = out.element_size(), n = out.numel();
       const char *src = static_cast<const char *>(in.data_ptr());
       char *dst = static_cast<char *>(out.data_ptr());
-      if (kStage == 0) {
+      const RsAlgo algo = local ? rs_algo_ : kStage == 0 ? RsAlgo::A2a : RsAlgo::Staged;
+      if (algo == RsAlgo::Ring) {
+        ring(src, flat_out, n, es, combine);
+      } else if (algo == RsAlgo::A2a) {
         TORCH_CHECK(n * es <= kMaxCount, "fjmpi: reduce_scatter block too large for one MPI call");
         if (local) {
           at::Tensor recv = at::empty({size_, static_cast<int64_t>(n)}, out.options());
@@ -427,8 +470,8 @@ class FjMpiBackend : public c10d::Backend {
         }
       }
       const size_t chunk = kStage ? kStage / (es * size_) : 0;
-      TORCH_CHECK(kStage == 0 || chunk > 0, "fjmpi: group too large for the staging buffer");
-      for (size_t off = 0; kStage && off < n; off += chunk) {
+      TORCH_CHECK(algo != RsAlgo::Staged || chunk > 0, "fjmpi: group too large for the staging buffer");
+      for (size_t off = 0; algo == RsAlgo::Staged && off < n; off += chunk) {
         const size_t cnt = std::min(chunk, n - off);
         for (int r = 0; r < size_; ++r) std::memcpy(stage_in + r * cnt * es, src + (r * n + off) * es, cnt * es);
         if (local) {
@@ -444,6 +487,37 @@ class FjMpiBackend : public c10d::Backend {
       }
     }
     if (kind == c10d::ReduceOp::AVG) out.div_(size_);
+  }
+
+  // Ring reduce-scatter, in pieces of one staging buffer: at step k send the partial result for
+  // block (rank - k - 1) to the next rank, receive block (rank - k - 2) from the previous one and
+  // combine this rank's own part of it; after size - 1 steps the received block is this rank's.
+  template <typename Combine>
+  void ring(const char *src, at::Tensor &flat_out, size_t n, size_t es, Combine &combine) {
+    const auto opts = flat_out.options();
+    if (size_ == 1) {
+      std::memcpy(flat_out.data_ptr(), src, n * es);
+      return;
+    }
+    const size_t piece = std::min(kStage ? kStage / es : n, kMaxCount / es);
+    at::Tensor own_bufs = kStage ? at::Tensor() : at::empty({2, static_cast<int64_t>(piece)}, opts);
+    char *sbuf = kStage ? stage_in : static_cast<char *>(own_bufs[0].data_ptr());
+    char *rbuf = kStage ? stage_out : static_cast<char *>(own_bufs[1].data_ptr());
+    const int next = (rank_ + 1) % size_, prev = (rank_ + size_ - 1) % size_;
+    for (size_t off = 0; off < n; off += piece) {
+      const int64_t cnt = static_cast<int64_t>(std::min(piece, n - off));
+      auto own = [&](int b) {
+        return at::from_blob(const_cast<char *>(src) + (b * n + off) * es, {cnt}, opts);
+      };
+      at::Tensor send = at::from_blob(sbuf, {cnt}, opts), recv = at::from_blob(rbuf, {cnt}, opts);
+      std::memcpy(sbuf, src + ((rank_ + size_ - 1) % size_ * n + off) * es, cnt * es);
+      for (int k = 0; k < size_ - 1; ++k) {
+        check(MPI_Sendrecv(sbuf, static_cast<int>(cnt * es), MPI_BYTE, next, 0, rbuf, static_cast<int>(cnt * es),
+                           MPI_BYTE, prev, 0, comm_, MPI_STATUS_IGNORE), "MPI_Sendrecv");
+        at::Tensor o = k == size_ - 2 ? flat_out.narrow(0, static_cast<int64_t>(off), cnt) : send;
+        combine(o, recv, own(((rank_ - k - 2) % size_ + size_) % size_));
+      }
+    }
   }
 };
 

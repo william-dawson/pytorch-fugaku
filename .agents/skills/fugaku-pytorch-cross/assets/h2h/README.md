@@ -25,10 +25,14 @@ The directory is expected at `$WORK/h2h-scale` (`rank.sh` binds `$WORK` into the
   - `llvm-port`: fjmpi_port
   - `llvm-sync`: fjmpi_async with `TORCH_FUGAKU_ASYNC=0`
   - `llvm-async`: queued allgathers
+  - `container-sync` / `container-async`: the image build of fjmpi_async (`$WORK/h2h-async/container`)
 
   Suffixes modify a case:
   - `+PRESET` sets the allocator: `mi`, `mi-nohp`, `nohp`, `plainpy`, `*-af1/2`, `*-nommap`, `*-arena1/2`, `mi-*keep`
   - `@MB` sets `TORCH_FUGAKU_AG_STAGE_MB`
+  - `%ALGO` sets `TORCH_FUGAKU_RS_ALGO` (`staged`, `a2a`, `ring`, `auto`) and uses the `h2h-rsalgo`
+    builds of the backend: `$WORK/h2h-rsalgo/port` (LLVM) and `$WORK/h2h-rsalgo/container` (the
+    image's torch_fugaku with a rebuilt `_c10d.so`, first on `PYTHONPATH`). See ../collectives.
 - `run.py`: the driver (a wrapper around `llama_train.py`). It covers any node count and writes `timing.rank<N>.json` per rank: steps, phases with `getrusage` deltas, and fjmpi_async's blocked-time stats. Options:
   - `H2H_PROFILE_STEPS=a,b`: torch.profiler operator tables
   - `H2H_TRACE_STEPS=a,b`: fjmpi_async event trace

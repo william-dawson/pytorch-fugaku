@@ -186,6 +186,59 @@ PyTorch 1.13 fork needs 0.69 s for the same 73 calls. See [comparisons.md](compa
 The random stream differs from stock PyTorch's, so losses are not bit-identical to the container,
 but they fall normally. Llama has no dropout and is unaffected.
 
+## Fix 5 (64+ ranks): reduce-scatter algorithm (`TORCH_FUGAKU_RS_ALGO`)
+
+**Symptom.** At scale, reduce-scatter dominated the exposed communication: 6.5 s of a 32 s step for
+benchkit Llama-1B at 64 nodes, 2 × 24 (job 53511140).
+
+**Diagnosis.** fjmpi reduce-scatter is staged: chunks of the 8 MB staging buffer go through
+`MPI_Alltoall`, then a local sum. Each peer's slice is 8 MB / (4 B × ranks), so at 128 ranks a
+200 MB call becomes 24 latency-bound all-to-alls. `assets/collectives/rs_bench` measured each
+alternative in its own `mpiexec`. Times are seconds per 50M-float call; every result was checked
+exactly:
+
+| variant | 2×24, 32 ranks | 4×12, 64 ranks | 4×12, 128 ranks | 2×24, 128 ranks | 2×24, 256 ranks |
+|---|---:|---:|---:|---:|---:|
+| `a2a_staged` (old fjmpi) | **0.16** | 0.39 | 0.68 | 3.41 | 4.77 |
+| `a2a` (one `MPI_Alltoall`) | 0.17 | 0.20 | 0.33 | **0.38** | **0.48** |
+| `ring` (`MPI_Sendrecv` to neighbours) | 2.52 | **0.095** | **0.135** | 15.3 | > 36 at 4M floats |
+| `halving` (recursive) | 0.32 | 0.26 | 0.35 | 0.95 | timed out |
+| `allreduce` + slice | 0.21 | 0.37 | 0.40 | 46.1 | timed out |
+| `rsb` (`MPI_Reduce_scatter_block`) | 0.55 | 0.50 | 0.55 | 0.54 | 0.56 |
+
+Jobs 53512513-53512527; data in `evidence/collectives-2026-11-04.json`.
+- **At 4 ranks per node, ring wins** by 4-5× from 64 ranks up.
+- **At 2 ranks per node, anything that reduces between exchanges collapses at scale.** That
+  includes ring, halving and Fujitsu's own `MPI_Allreduce`. Only the all-to-alls and `rsb` hold up.
+  Ring *allgather* is fine at 2 × 24 (below), so plain point-to-point is not the problem.
+- **No variant grows MPI's memory**, so reduce-scatter is not why 4 × 12 runs out of memory at
+  some node counts.
+- **Allgather does not collapse.** Staged 0.053-0.066 s, one `MPI_Allgather` 0.031-0.045 s,
+  persistent 0.049-0.071 s, ring 0.11-0.15 s, at 64-128 ranks on both layouts (jobs
+  53576485-53576491). It is left staged.
+
+**Fix.** `torch_fugaku/csrc/c10d_mpi.cpp` takes `TORCH_FUGAKU_RS_ALGO=auto|staged|a2a|ring`
+(default `auto`). Both the image's `fjmpi` and fjmpi_port build this file.
+- `auto` uses `staged` below 64 ranks, `ring` at 4 or more ranks per node (counted with
+  `MPI_Comm_split_type`), and `a2a` otherwise.
+- Ring runs through the two staging buffers, so Tofu never registers new memory.
+- Rank 0 logs the choice: `fjmpi: reduce_scatter uses ring (64 ranks, 4 per node)`.
+- `tests/test_backend_mpi.py` passes under all four settings (job 53575982).
+
+**Training** (benchkit Llama-1B, seq 2048, ZeRO-3; each pair ran in one allocation; losses
+identical within each pair):
+
+| stack, layout | staged | new | tokens/s/node |
+|---|---:|---:|---:|
+| container, 4 × 12, 16 nodes | 48.05 s | ring 44.02 s (−8.4%) | 170.5 → 186.1 |
+| LLVM (+mi), 4 × 12, 16 nodes | 57.05 s | ring 49.65 s (−13%) | 143.6 → 165.0 |
+| container, 2 × 24, 64 nodes | 34.75 s | a2a 34.25 s (−1.4%) | 117.9 → 119.6 |
+
+The 4 × 12 allocations (jobs 53576418 / 53576423) were slow overall. Earlier 16-node runs did about
+36 s (LLVM) and 40 s (container) per step, so compare within the pairs only. At 2 × 24 the
+microbenchmark's 9× did not carry over. Either registering torch's fresh buffers costs it back, or
+most of the profiled reduce-scatter time was waiting on other ranks. This is not yet profiled.
+
 ## Layout: 4 ranks × 12 threads only
 
 The LLVM build is about 40× slower with fewer than 4 ranks per node (2 × 24, 1 × 48): collectives
@@ -229,6 +282,7 @@ which VmRSS does not count. See large-pages.md.
 
 - 8+ node 1B, longer runs, and mimalloc at 125M (not needed there, not yet shown harmless).
 - Why wide ranks (2 × 24, 1 × 48) make every collective cost about 1.4 s.
+- Why reductions collapse at 2 ranks per node (Fix 5), and why the a2a gain at 2 × 24 is small in training.
 - The mechanism of ProcessGroupMPI's stalls (fix 2 avoids it rather than explaining it).
 - Communication is still exposed: 30% of a 125M step and about half of a 1B step is spent blocked
   in allgather and reduce-scatter. See [overlap.md](overlap.md).

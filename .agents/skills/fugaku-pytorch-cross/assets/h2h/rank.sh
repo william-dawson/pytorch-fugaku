@@ -9,6 +9,13 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root=$(dirname -- "$here")
 case=${1:?expected container, llvm-port, llvm-sync or llvm-async}
+# CASE%ALGO: that case with TORCH_FUGAKU_RS_ALGO=ALGO (staged, a2a, ring, auto) and the h2h-rsalgo
+# builds of the backend (container: its torch_fugaku first on PYTHONPATH; llvm: fjmpi_port).
+if [[ "$case" == *%* ]]; then
+  export TORCH_FUGAKU_RS_ALGO=${case##*%} H2H_PORT_PATH=$root/h2h-rsalgo/port
+  rs_path=/cross/h2h-rsalgo/container:
+  case=${case%\%*}
+fi
 # llvm-*+PRESET: libmpg (the LLVM python's malloc) settings; at 1B the LLVM build took ~30x the
 # container's page faults with large pages off (jobs 53465728 vs 53463764).
 if [[ "$case" == *+* ]]; then
@@ -71,13 +78,21 @@ args=(--model "${H2H_MODEL:?}" --seq "${H2H_SEQ:-128}" --micro-batch "${H2H_MB:-
   --warmup "${H2H_WARMUP:?}" --attn sdpa_causal --checkpointing --low-mem)
 # gpt-* models only: llama_train's --dropout (transformers' default 0.1, as Megatron).
 [[ -n "${H2H_DROPOUT:-}" ]] && args+=(--dropout "$H2H_DROPOUT")
-if [[ "$case" == container ]]; then
+if [[ "$case" == container* ]]; then
+  # container-sync / container-async: the image build of fjmpi_async (h2h-async/container),
+  # synchronous or with queued, Tofu-offloaded allgathers; plain "container" is the image's fjmpi.
+  cbackend=fjmpi
+  case "$case" in
+    container-sync) cbackend=fjmpi_async; export TORCH_FUGAKU_ASYNC=0 ;;
+    container-async) cbackend=fjmpi_async; export TORCH_FUGAKU_ASYNC=1 ;;
+  esac
+  [[ "$cbackend" == fjmpi_async ]] && export H2H_CONTAINER_BACKEND=fjmpi_async H2H_ASYNC_PATH=/cross/h2h-async/container
   # Fujitsu BLAS only at one rank per CMG, as benchkit PR 343 (wider ranks: README deadlock warning).
-  export H2H_VARIANT=container PF_BIND="$root:/cross:rw" PYTHONPATH=/cross/h2h-paired/site310
+  export H2H_VARIANT=container PF_BIND="$root:/cross:rw" PYTHONPATH=${rs_path:-}/cross/h2h-paired/site310
   if (( rpn == 4 )); then export PF_FJBLAS=1; fi
   export H2H_OUTPUT="/cross/h2h-scale/${H2H_OUTPUT_REL:?}"
   bash "$root/h2h-paired/pf/pf-run" "$root/pytorch-fugaku-b5879f2.sif" python -u /cross/h2h-scale/run.py \
-    "${args[@]}" --backend fjmpi > "$out/rank$rank.log" 2>&1
+    "${args[@]}" --backend "$cbackend" > "$out/rank$rank.log" 2>&1
   exit
 fi
 export H2H_VARIANT=llvm RANK=$rank LOCAL_RANK=$((rank % rpn)) LOCAL_SIZE=$rpn USE_LIBUV=0 TORCH_FUGAKU_STAGE_MB=${TORCH_FUGAKU_STAGE_MB:-8}

@@ -43,6 +43,9 @@ For models with dropout, load `assets/fastdrop` (stock CPU `bernoulli_` was 71% 
 The same kernel is now in torch_fugaku, so the new SIF gets it too (then LLVM leads by 2% at
 GPT-125M, 15% at 1.3B). With both, it beats the legacy SIF (1.5x at GPT-125M, 2.5x at 1.3B) and the new SIF (5-25%;
 benchkit Llama-1B fits 4x12 only at 12 and 16 nodes, 239 and 225 tokens/s/node).
+From 64 ranks, the fjmpi backends pick their reduce-scatter (`TORCH_FUGAKU_RS_ALGO=auto`): ring at
+4 ranks/node (-8% to -13% step time at 16 nodes), one all-to-all at 2 ranks/node (-1.4%). This needs
+torch_fugaku after this change: the b5879f2 image predates it. See performance.md, Fix 5.
 
 ## Operational invariants
 
