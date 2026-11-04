@@ -22,6 +22,14 @@ RUN curl -sSL https://download.open-mpi.org/release/open-mpi/v4.0/openmpi-4.0.1.
 
 RUN pip install --no-cache-dir torch==${TORCH_VERSION}
 
+# The large-model stack the examples and the measurements used (fugaku-pytorch skill). DeepSpeed's
+# C++ ops are not prebuilt: on Fugaku its collectives go through torch.distributed ("fjmpi").
+ARG DEEPSPEED_VERSION=0.19.8
+ARG TRANSFORMERS_VERSION=4.57.6
+ARG ACCELERATE_VERSION=1.15.0
+RUN DS_BUILD_OPS=0 pip install --no-cache-dir numpy deepspeed==${DEEPSPEED_VERSION} \
+      transformers==${TRANSFORMERS_VERSION} accelerate==${ACCELERATE_VERSION}
+
 COPY torch_fugaku /tmp/torch_fugaku
 RUN /tmp/torch_fugaku/build.sh && rm -rf /tmp/torch_fugaku
 
@@ -35,6 +43,7 @@ RUN mkdir -p /opt/pytorch-fugaku/fujitsu-mpi /opt/pytorch-fugaku/hostlib /opt/py
 ENV PATH=/opt/openmpi/bin:$PATH \
     LD_LIBRARY_PATH=/opt/pytorch-fugaku/fujitsu-mpi:/opt/pytorch-fugaku/hostlib:/opt/FJSVxtclanga/tcsds-latest/lib64:/opt/openmpi/lib \
     TORCH_FUGAKU=1 \
+    DS_ACCELERATOR=cpu \
     OMP_WAIT_POLICY=ACTIVE \
     PYTHONNOUSERSITE=1
 COPY tests /opt/pytorch-fugaku/tests

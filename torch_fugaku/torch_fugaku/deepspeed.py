@@ -10,6 +10,11 @@ own layout, so results are bit-identical.
 
 In the pytorch-fugaku image (``TORCH_FUGAKU=1``) this is applied when DeepSpeed's
 ZeRO-3 module is first imported; ``TORCH_FUGAKU_FAST_ZERO=0`` turns it off.
+
+``no_jit_ops()`` (also on import of ``deepspeed``, unless ``TORCH_FUGAKU_DS_OPS=1``) marks
+DeepSpeed's C++ ops unavailable, so it never tries to JIT-build them (its CPU accelerator wants
+ninja, which the image does not ship) and its collectives go through torch.distributed, i.e.
+the fjmpi backend. Every recorded measurement ran this way.
 """
 import importlib.abc
 import importlib.machinery
@@ -17,9 +22,26 @@ import math
 import os
 import sys
 
-__all__ = ["fast_zero3", "install"]
+__all__ = ["fast_zero3", "no_jit_ops", "install"]
 
-_state = {"patched": False}
+_state = {"patched": False, "no_jit": False}
+
+
+def no_jit_ops():
+    """Mark every DeepSpeed op incompatible, and make an explicit load an error. Idempotent."""
+    if _state["no_jit"]:
+        return
+    import deepspeed.ops
+    from deepspeed.ops.op_builder.all_ops import ALL_OPS
+    from deepspeed.ops.op_builder.builder import OpBuilder
+
+    deepspeed.ops.__compatible_ops__ = dict.fromkeys(ALL_OPS, False)
+
+    def no_jit(self, *args, **kwargs):
+        raise RuntimeError(f"DeepSpeed op {self.name}: torch_fugaku disabled JIT ops (TORCH_FUGAKU_DS_OPS=1 enables)")
+
+    OpBuilder.load = OpBuilder.jit_load = no_jit
+    _state["no_jit"] = True
 
 
 def fast_zero3():
@@ -83,11 +105,14 @@ def fast_zero3():
     _state["patched"] = True
 
 
-class _AfterStage3Import(importlib.abc.MetaPathFinder):
-    _name = "deepspeed.runtime.zero.stage3"
+class _AfterImport(importlib.abc.MetaPathFinder):
+    """Run ``then`` once, right after module ``name`` has executed."""
+
+    def __init__(self, name, then):
+        self.name, self.then = name, then
 
     def find_spec(self, name, path, target=None):
-        if name != self._name:
+        if name != self.name:
             return None
         sys.meta_path.remove(self)
         spec = importlib.machinery.PathFinder.find_spec(name, path)
@@ -97,18 +122,23 @@ class _AfterStage3Import(importlib.abc.MetaPathFinder):
 
         def exec_module(module):
             run(module)
-            sys.modules[self._name] = module  # fast_zero3 imports it
-            fast_zero3()
+            sys.modules[self.name] = module
+            self.then()
 
         spec.loader.exec_module = exec_module
         return spec
 
 
+def _when_imported(name, then):
+    if name in sys.modules:
+        then()
+    elif not any(isinstance(f, _AfterImport) and f.name == name for f in sys.meta_path):
+        sys.meta_path.insert(0, _AfterImport(name, then))
+
+
 def install():
-    """Apply fast_zero3 now if ZeRO-3 is loaded, else when it is first imported."""
-    if os.environ.get("TORCH_FUGAKU_FAST_ZERO", "1") == "0" or _state["patched"]:
-        return
-    if _AfterStage3Import._name in sys.modules:
-        fast_zero3()
-    elif not any(isinstance(f, _AfterStage3Import) for f in sys.meta_path):
-        sys.meta_path.insert(0, _AfterStage3Import())
+    """no_jit_ops when deepspeed is imported, fast_zero3 when ZeRO-3 is (or now, if already)."""
+    if os.environ.get("TORCH_FUGAKU_DS_OPS", "0") != "1":
+        _when_imported("deepspeed", no_jit_ops)
+    if os.environ.get("TORCH_FUGAKU_FAST_ZERO", "1") != "0":
+        _when_imported("deepspeed.runtime.zero.stage3", fast_zero3)

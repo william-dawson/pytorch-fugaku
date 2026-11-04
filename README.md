@@ -107,6 +107,7 @@ Switches: `TORCH_FUGAKU_KERNELS=0`, `TORCH_FUGAKU_ONEDNN=1`,
 
 ## Running DeepSpeed
 
+DeepSpeed 0.19.8, transformers 4.57.6 and accelerate 1.15.0 are in the image (`DS_ACCELERATOR=cpu`).
 ZeRO (and FSDP) call `torch.distributed` collectives directly, so point DeepSpeed at the
 `"fjmpi"` backend instead of initialising a process group yourself:
 
@@ -121,12 +122,15 @@ deepspeed.init_distributed(dist_backend="fjmpi", init_method="fjmpi://")
 default `env://` makes rank 0 serve one socket per rank, which failed on Fugaku from about 1000
 ranks.
 
-On the CPU accelerator (`DS_ACCELERATOR=cpu`), DeepSpeed JIT-compiles a shared-memory comm op
-with `ninja`/`gcc` the first time it's used; point `TORCH_EXTENSIONS_DIR` at a writable path
-(reusing it across runs is fine -- the build is keyed on torch/DeepSpeed's ABI, not your model).
-`num_workers=0` and `PF_BIND` apply the same as any other job (above).
+torch_fugaku marks DeepSpeed's C++ ops unavailable when DeepSpeed is imported, so DeepSpeed does
+not try to JIT-build them (the image has no ninja), and its collectives go through fjmpi. Every
+recorded measurement ran this way. `TORCH_FUGAKU_DS_OPS=1` restores DeepSpeed's default; it then
+JIT-compiles a shared-memory comm op with `ninja`/`gcc` and needs a writable
+`TORCH_EXTENSIONS_DIR`. `num_workers=0` and `PF_BIND` apply the same as any other job (above).
 
-**`PF_FJBLAS=1` is not safe with more than one rank per node.** Two failure modes, both
+**`PF_FJBLAS=1` is not safe with more than one rank per node** when DeepSpeed's shared-memory op
+is in use (`TORCH_FUGAKU_DS_OPS=1`); with the default (ops off), 4 × 12 with `PF_FJBLAS=1` is
+what every measurement used. Two failure modes, both
 reproducible: at 2+ ranks per node, DeepSpeed's intra-node shared-memory comm setup deadlocks
 after it reports the comm op built successfully, before the first step; at exactly 1 rank per
 node but more than one physical node, the process-group rendezvous itself deadlocks instead.

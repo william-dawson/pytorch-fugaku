@@ -3,20 +3,10 @@
 All of these run the image through `pf-setup` (once per job) and `pf-run` (once per rank under
 Fujitsu `mpiexec`); see the repository README for pulling the image.
 
-DeepSpeed and transformers are not in the image. Install them for the image's Python 3.10
-(aarch64) into a directory on a data volume, bind it in, and put it on `PYTHONPATH`. Compute
-nodes have no internet, so install from a login node for the target platform.
-
-The measurements used deepspeed 0.19.8, transformers 4.57.6 and accelerate 1.15.0. One way to
-install them, not re-verified as written:
-
-```sh
-pip install --target /vol0X0X/data/<group>/site310 --python-version 3.10 \
-    --platform manylinux2014_aarch64 --only-binary=:all: transformers==4.57.6 accelerate
-DS_BUILD_OPS=0 pip install --target /vol0X0X/data/<group>/site310 --no-deps deepspeed==0.19.8
-# in jobs:
-export PF_BIND=/vol0X0X/data/<group>:/work PYTHONPATH=/work/site310
-```
+DeepSpeed 0.19.8, transformers 4.57.6 and accelerate 1.15.0 are in the image, with
+`DS_ACCELERATOR=cpu`. torch_fugaku turns DeepSpeed's C++ ops off on import, so nothing is
+JIT-built; `TORCH_FUGAKU_DS_OPS=1` restores DeepSpeed's default. Bind your code and data with
+`PF_BIND`, for example `export PF_BIND=/vol0X0X/data/<group>:/work`.
 
 ## DeepSpeed ZeRO-3 (1-3B models)
 
@@ -25,7 +15,7 @@ export PF_BIND=/vol0X0X/data/<group>:/work PYTHONPATH=/work/site310
 #PJM --mpi "max-proc-per-node=4"
 #PJM --llio cn-cache-size=384Mi
 #PJM -x PJM_LLIO_GFSCACHE=/vol0004
-export OMP_NUM_THREADS=12 PF_FJBLAS=1 DS_ACCELERATOR=cpu TORCH_EXTENSIONS_DIR=/work/.torch_ext
+export OMP_NUM_THREADS=12 PF_FJBLAS=1
 pytorch-fugaku/fugaku/pf-setup 4
 mpiexec -n 64 pytorch-fugaku/fugaku/pf-run pytorch-fugaku.sif python \
   /opt/pytorch-fugaku/examples/llama_train.py --backend fjmpi --model 1b --seq 2048 --zero 3 \

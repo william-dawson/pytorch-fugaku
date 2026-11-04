@@ -10,6 +10,8 @@ The image (`ghcr.io/william-dawson/pytorch-fugaku`) is the stock PyTorch aarch64
 - A64FX kernels (gelu, tanh, bmm, transposed GEMM, dropout masks).
 - The `"fjmpi"` `torch.distributed` backend over Fujitsu MPI, choosing its reduce-scatter and
   allgather algorithms by layout.
+- DeepSpeed 0.19.8, transformers 4.57.6 and accelerate 1.15.0. DeepSpeed's C++ ops are off, so
+  nothing is JIT-built and its collectives use fjmpi.
 - DeepSpeed ZeRO-3 without its per-rank Python loops.
 
 How it was measured, and every dead end: the `fugaku-pytorch-dev` skill.
@@ -61,6 +63,8 @@ config, the tensor-parallel launch, binding code and Python packages in with `PF
   separates waiting for the slowest rank (skew) from transfer.
 - **`TORCH_FUGAKU_FAST_ZERO=0`** turns the ZeRO-3 patch off. It is bit-identical and on by
   default.
+- **`TORCH_FUGAKU_DS_OPS=1`** lets DeepSpeed JIT-build its C++ ops. It needs ninja and a
+  writable `TORCH_EXTENSIONS_DIR`, and was never measured.
 - **Memory at 4 × 12** is about 7 GB per rank.
   - Use `torch_fugaku.nn.chunked_lm_loss(model)` for large vocabularies.
   - Build ZeRO-3 models with `from_config` under `zero.Init`; see `llama_train.py --zero-init`.

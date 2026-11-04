@@ -11,5 +11,4 @@ In the image they are in `/opt/pytorch-fugaku/examples`. Launch every rank throu
   (torch_fugaku.parallel). For 10B+ models at 4 ranks per node; `--tp 4 --sp`.
   `--check` compares a tiny model step by step against an unsharded copy.
 
-DeepSpeed and transformers are not in the image; install them where the image's Python sees
-them (for example a directory on `PYTHONPATH`).
+DeepSpeed, transformers and accelerate are in the image.
