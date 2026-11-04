@@ -108,9 +108,39 @@ bash ./run.sh        # #PJM --mpi max-proc-per-node=4, --llio cn-cache-size=384M
 `mem_probe.py results.<job>/<case>` reports the max-rank memory per phase and the lowest free
 memory per node (with `H2H_MEMSAMPLE=1`).
 
+## Full 48-layer runs
+
+`--sp`, `MIMALLOC_PURGE_DELAY=0`, `init_method="fjmpi://"` from 256 nodes (env:// did not start
+there; experiments.md), `TORCH_FUGAKU_COMM_STATS=1`, steady steps 1-3.
+
+| nodes | step | tokens/s per node | peak per rank | communication | job |
+|---:|---:|---:|---:|---:|---|
+| 64 | 341 s | 6.0 | 5.1 GB | 43% | 53591572 |
+| 128 | 358 s | 5.7 | 4.5 GB | 46% | 53591561 |
+| 256 | 269 s | 7.6 | 4.2 GB | 28% | 53599160 |
+| 576 | 312 s | **6.6** | 4.0 GB | 38% | 53599168 |
+
+**Reference:** legacy SIF, 576 nodes: ~6.0 tokens/s per node (870-923 s for 1536 sequences).
+
+- **Compute is flat:** 194.5 s per step in every run. All the variation is communication.
+  - Communication per step: 64 nodes 147 s, 128 nodes 163 s, 256 nodes 74 s, 576 nodes 118 s.
+  - Allocations differ in placement; up to 384 nodes, `node=N` gives a non-contiguous one.
+  - Compute alone would give 10.5 tokens/s per node.
+- **576 nodes (always a torus), same allocation:**
+  - ring reduce-scatter + ring allgather (`auto`): 312.0 s.
+  - a2a reduce-scatter + direct `MPI_Allgather`: 470.0 s. Reduce-scatter 36.8 → 179.2 s;
+    allgather 76.9 → 68.4 s.
+  - The 4-group microbenchmark on the torus had favoured a2a and direct by 2-7x. It did not
+    predict training.
+- **First step:** 1314 s at 256 nodes, and 1563 s at 576 nodes for the job's first case. The
+  second case in the same 576-node allocation took 328 s, so this is a cold start (caches).
+
 ## Open
 
-- The full 48-layer run (64 and 128 nodes) is in progress; numbers to follow.
+- Overlap FSDP's collectives with compute (needs asynchronous collectives in fjmpi): 28-46% of
+  the step.
+- Ring reduce-scatter + direct allgather at 576 nodes (allgather 77 → 68 s seen).
+- Cold-start first step: `llio_transfer` of the Python tree.
 - `--sp`'s time cost against plain tensor parallel.
 - The global batch is one sequence per tensor-parallel group per step (64 at 256 nodes). Matching
   the legacy 1536 needs gradient accumulation, or more nodes.

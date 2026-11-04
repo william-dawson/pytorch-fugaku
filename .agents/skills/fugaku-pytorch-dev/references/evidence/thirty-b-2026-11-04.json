@@ -191,5 +191,102 @@
    "gpt-125m": 10.976,
    "llama-125m": 9.86
   }
+ },
+ "full_runs": [
+  {
+   "job": 53591572,
+   "nodes": 64,
+   "step_s": 341.3,
+   "tokens_per_s_per_node": 6.0,
+   "peak_rank_gb": 5.09,
+   "allgather_s": 84.8,
+   "reduce_scatter_s": 57.6,
+   "allreduce_s": 4.7,
+   "compute_s": 194.2
+  },
+  {
+   "job": 53591561,
+   "nodes": 128,
+   "step_s": 357.6,
+   "tokens_per_s_per_node": 5.73,
+   "peak_rank_gb": 4.48,
+   "allgather_s": 86.0,
+   "reduce_scatter_s": 72.0,
+   "allreduce_s": 4.9,
+   "compute_s": 194.8,
+   "first_step_s": 1174.9
+  },
+  {
+   "job": 53599160,
+   "nodes": 256,
+   "step_s": 268.9,
+   "tokens_per_s_per_node": 7.62,
+   "peak_rank_gb": 4.16,
+   "allgather_s": 50.0,
+   "reduce_scatter_s": 20.7,
+   "allreduce_s": 3.8,
+   "compute_s": 194.5,
+   "first_step_s": 1314.5,
+   "rendezvous": "fjmpi://"
+  },
+  {
+   "job": 53599168,
+   "nodes": 576,
+   "algos": "auto (ring,ring)",
+   "step_s": 312.0,
+   "tokens_per_s_per_node": 6.56,
+   "peak_rank_gb": 4.03,
+   "allgather_s": 76.9,
+   "reduce_scatter_s": 36.8,
+   "allreduce_s": 3.9,
+   "compute_s": 194.5,
+   "first_step_s": 327.5,
+   "note": "second case in the allocation"
+  },
+  {
+   "job": 53599168,
+   "nodes": 576,
+   "algos": "a2a,direct",
+   "step_s": 470.0,
+   "tokens_per_s_per_node": 4.36,
+   "allgather_s": 68.4,
+   "reduce_scatter_s": 179.2,
+   "allreduce_s": 4.0,
+   "compute_s": 218.3,
+   "first_step_s": 1563.1,
+   "note": "first case in the allocation"
+  }
+ ],
+ "purge_ab": {
+  "job": 53596798,
+  "layers": 8,
+  "nodes": 32,
+  "step_s": {
+   "default": 50.904,
+   "purge0": 54.579
+  },
+  "peak_rank_gb": {
+   "default": 5.77,
+   "purge0": 3.76
+  },
+  "losses_identical": true
+ },
+ "torus_bench_573MB": {
+  "53596666 4x6x4": {
+   "rs_ring": 0.774,
+   "rs_a2a": 0.426,
+   "ag": 0.071,
+   "ag_staged": 0.1,
+   "ag_persist": 0.538,
+   "ag_ring": 0.719
+  },
+  "53596667 4x6x6": {
+   "rs_ring": 0.758,
+   "rs_a2a": 0.442,
+   "ag": 0.073,
+   "ag_staged": 0.116,
+   "ag_persist": 0.54,
+   "ag_ring": 0.722
+  }
  }
 }

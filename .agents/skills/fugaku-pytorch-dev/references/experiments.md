@@ -55,7 +55,7 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 | TCPStore rendezvous stops at 1012 clients: rank 0 hits the 1024 open-file soft limit (jobs 53593695 at 256 nodes, 53593699 at 576, both "1012/N clients joined"); `pf-run` raises it to the hard limit (262144) | this page | image (`fugaku/pf-run`) |
 | With the limit raised, 12 of 1024 ranks still loop on "Connection reset by peer" and the store never completes (job 53597324; at 2304 workers torch warns `somaxconn` is 2048, job 53597327). `init_method="fjmpi://"` gives each process a local `HashStore` with rank/size from the launcher; fjmpi needs only MPI, and torch does not barrier on the store when creating groups (`TORCH_DIST_INIT_BARRIER=0`) | this page | image (`torch_fugaku.register_backend`) |
 | Why `ulimit -n` in `pf-run` did not help (still 1012/N, jobs 53597324, 53597327): PJM caps open files per process with the `proc-openfd` resource (default 1024, max 1048576; `#PJM -L "proc-openfd=N"`); `somaxconn` (2048) is node-wide and not settable per job, so `env://` beyond it also needs staggered connects (per Fugaku support documentation, relayed in session) | this page | documented |
-| First step at 128 nodes: forward 892 s vs 103 s at 64. Hypothesis: the lazy-import metadata storm (~600 modules per process; RIKEN reports `llio_transfer` cut PyTorch start-up 6x at 1536 processes); the `site310` overlay is on the shared filesystem | thirty-b.md | open: test `llio_transfer` |
+| First step at 128 nodes: forward 892 s vs 103 s at 64; at 576 nodes the second case in one allocation started in 328 s vs 1563 s, so it is a cold start. Hypothesis: the lazy-import metadata storm (~600 modules per process; RIKEN reports `llio_transfer` cut PyTorch start-up 6x at 1536 processes); the `site310` overlay is on the shared filesystem | thirty-b.md | open: test `llio_transfer` |
 
 ## Overlap
 
@@ -80,7 +80,8 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 |---|---|---|
 | Legacy SIF: 576 nodes, 1 × 48, TP6 × PP8 × DP12, 870-923 s/iteration, ~6 tokens/s/node | comparisons.md, thirty-b.md | baseline |
 | Tensor parallel 4 in the node × FSDP2 (`torch_fugaku.parallel`), sequence parallel, vocab-parallel loss: matches an unsharded copy to 1.6e-7 | thirty-b.md | opt-in (`examples/tp_train.py`) |
-| Full 30B at 4 × 12: 6.00 tokens/s/node at 64 nodes, 5.73 at 128 (peak 5.1 / 4.5 GB per rank) | thirty-b.md | measured |
+| Full 30B at 4 × 12: 6.0 / 5.7 / 7.6 / **6.6** tokens/s/node at 64 / 128 / 256 / 576 nodes (legacy SIF: ~6.0 at 576); compute 194.5 s/step everywhere, communication 28-46% | thirty-b.md "Full 48-layer runs" | measured |
+| On a 576-node torus, a2a reduce-scatter + direct `MPI_Allgather` (the microbenchmark winners) were 470 s vs 312 s for rings in training | thirty-b.md | `auto` keeps rings |
 | First step at 128 nodes: forward 892 s vs 103 s at 64 (one-off; later steps normal) | thirty-b.md | open |
 | Communication 43% of the 64-node step; ~1.3 GB/s per node average, far below Tofu | thirty-b.md | open |
 

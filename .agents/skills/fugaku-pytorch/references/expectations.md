@@ -31,12 +31,18 @@ Per-rank steady RSS at 4 × 12 is about 5.2-6.2 GB.
 | nodes | step | tokens/s per node | peak per rank | communication |
 |---:|---:|---:|---:|---:|
 | 64 | 341 s | 6.0 | 5.1 GB | 43% |
-| 128 | 358 s | 5.7 | 4.5 GB | |
+| 128 | 358 s | 5.7 | 4.5 GB | 46% |
+| 256 | 269 s | 7.6 | 4.2 GB | 28% |
+| 576 | 312 s | **6.6** | 4.0 GB | 38% |
 
 **Legacy Fugaku-LLM Megatron SIF**, GPT-30B on 576 nodes (1 × 48, TP6 × PP8 × DP12): ~6 tokens/s
 per node.
 
-- The first step at 128 nodes takes about 3x a steady step, all in its forward pass.
+- Compute is 194.5 s per step at every node count; communication depends on the allocation.
+- At 576 nodes this is about 10% more per node than the legacy SIF on the same node count.
+- The first step of a cold start takes 3-5x a steady step, in its first forward pass. A second
+  launch in the same allocation started in 328 s instead of 1563 s, so it is cache warming.
+- Use `init_method="fjmpi://"`. 256 and 576 nodes only started with it.
 - ZeRO-3 cannot run 30B at 4 × 12 or 2 × 24 (out of memory). 1 × 48 fits, but runs about 1.7
   tokens/s per node.
 

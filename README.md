@@ -189,8 +189,8 @@ At 4 × 12 (one rank per CMG), it needs `--loss-chunk` (`torch_fugaku.nn`) to fi
 
 A 30B model (the Fugaku-LLM Megatron SIF's GPT-30B shape) does not fit ZeRO-3 at 4 ranks per
 node. With tensor parallel 4 inside each node × FSDP2 across nodes (`examples/tp_train.py`), it
-trains at 6.0 tokens/s per node on 64 nodes and 5.7 on 128. The legacy Megatron SIF does about
-6 on 576 nodes. Details, including memory and what limits scaling, are in the `fugaku-pytorch`
+trains at 6.0, 5.7, 7.6 and 6.6 tokens/s per node on 64, 128, 256 and 576 nodes. The legacy
+Megatron SIF does about 6.0 on 576 nodes. Details, including memory and what limits scaling, are in the `fugaku-pytorch`
 skill.
 
 ## Fujitsu's linear algebra (optional)
