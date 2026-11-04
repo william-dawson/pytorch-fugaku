@@ -149,8 +149,18 @@ def main():
 
     t0 = time.perf_counter()
     t_import = t0 - T_START
+    # pf-run sets RANK/WORLD_SIZE/LOCAL_RANK; a plain mpirun sets only its own variables, and
+    # DeepSpeed's MPI discovery would then need mpi4py.
+    env = os.environ
+    env.setdefault("RANK", env.get("PMIX_RANK", env.get("OMPI_COMM_WORLD_RANK", "0")))
+    env.setdefault("WORLD_SIZE", env.get("OMPI_COMM_WORLD_SIZE", "1"))
+    env.setdefault("LOCAL_RANK", env.get("OMPI_COMM_WORLD_LOCAL_RANK", "0"))
+    env.setdefault("MASTER_ADDR", "127.0.0.1")
+    env.setdefault("MASTER_PORT", "29514")
     # fjmpi:// (torch_fugaku): no TCP rendezvous, which failed on Fugaku from ~1000 ranks.
-    deepspeed.init_distributed(dist_backend=a.backend, init_method="fjmpi://" if a.backend == "fjmpi" else None)
+    fj = a.backend == "fjmpi"
+    deepspeed.init_distributed(dist_backend=a.backend, init_method="fjmpi://" if fj else None,
+                               auto_mpi_discovery=not fj)
     rank, world = dist.get_rank(), dist.get_world_size()
     gpu = torch.cuda.is_available()
     if gpu:
