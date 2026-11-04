@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**.md", "source-build/**", ".github/workflows/source-build.yml"]
+    paths-ignore: ["**.md", ".agents/**", "source-build/**", ".github/workflows/source-build.yml"]
   workflow_dispatch:
 
 permissions:
@@ -48,9 +48,11 @@ jobs:
       # are set here only, not in the image, since Fujitsu MPI also reads
       # OMPI_MCA_* variables.
       - name: Import and autoload
-        run: docker run --rm pytorch-fugaku:test python -c "import torch, torch_fugaku; s = torch_fugaku.status(); print(torch.__version__, s); assert 'parbmm' in s['kernels'] and s['backend'] == 'fjmpi' and not torch.backends.mkldnn.enabled"
+        run: docker run --rm pytorch-fugaku:test python -c "import torch, torch_fugaku; s = torch_fugaku.status(); print(torch.__version__, s); assert 'parbmm' in s['kernels'] and s['backend'] == 'fjmpi' and not torch.backends.mkldnn.enabled; import sys; assert any(type(f).__name__ == '_AfterStage3Import' for f in sys.meta_path)"
       - name: Kernels
         run: docker run --rm -e TORCH_FUGAKU=0 pytorch-fugaku:test python /opt/pytorch-fugaku/tests/test_kernels.py
+      - name: Chunked LM loss
+        run: docker run --rm pytorch-fugaku:test python /opt/pytorch-fugaku/tests/test_nn.py
       - name: DDP gradients over MPI, 2 ranks
         run: |
           docker run --rm -e TORCH_FUGAKU=0 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
@@ -61,6 +63,17 @@ jobs:
             docker run --rm -e OMP_NUM_THREADS=1 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test \
               mpirun --allow-run-as-root --oversubscribe -np $n python /opt/pytorch-fugaku/tests/test_backend_mpi.py
           done
+      - name: Backend with ring reduce-scatter and all-gather, 4 ranks
+        run: |
+          docker run --rm -e OMP_NUM_THREADS=1 -e OMPI_MCA_plm_rsh_agent=false \
+            -e TORCH_FUGAKU_RS_ALGO=ring -e TORCH_FUGAKU_AG_ALGO=ring pytorch-fugaku:test \
+            mpirun --allow-run-as-root --oversubscribe -np 4 python /opt/pytorch-fugaku/tests/test_backend_mpi.py
+      - name: Tensor parallel x FSDP2 against an unsharded copy, 4 ranks (TP 2 x DP 2)
+        run: |
+          docker run --rm -e OMP_NUM_THREADS=1 -e OMPI_MCA_plm_rsh_agent=false pytorch-fugaku:test bash -c \
+            "pip install -q --no-cache-dir transformers==4.57.6 && mpirun --allow-run-as-root --oversubscribe -np 4 \
+             python /opt/pytorch-fugaku/examples/tp_train.py --check --model tiny --tp 2 --sp --seq 64 --steps 3 --warmup 1 --checkpointing \
+             | tee /tmp/check.log && grep -q '\"ok\": true' /tmp/check.log"
       - uses: docker/build-push-action@v6
         with:
           context: .
