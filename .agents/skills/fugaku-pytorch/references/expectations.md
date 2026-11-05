@@ -26,6 +26,11 @@ Communication share at 128 nodes:
 
 Per-rank steady RSS at 4 × 12 is about 5.2-6.2 GB.
 
+The same 1B shape (untied) with tensor parallel 4 × FSDP2 instead of ZeRO-3, 4 sequences per
+tensor-parallel group: 177.7 / 176.0 tokens/s per node at 4 / 16 nodes, 6.4 GB per rank, and it
+runs from 4 nodes, where ZeRO-3 at 4 × 12 does not fit (benchkit `fsdp-llm`; FSDP2 alone fits only
+1 sequence per rank, 166).
+
 ## 30B (Llama with the legacy GPT-30B shape), tensor parallel 4 × FSDP2 at 4 × 12, `--sp`
 
 | nodes | step | tokens/s per node | peak per rank | communication |

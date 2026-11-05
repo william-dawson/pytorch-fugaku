@@ -78,7 +78,7 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 
 | Finding | Evidence | Status |
 |---|---|---|
-| Legacy SIF: 576 nodes, 1 × 48, TP6 × PP8 × DP12, 870-923 s/iteration, ~6 tokens/s/node | comparisons.md, thirty-b.md | baseline |
+| Legacy SIF: 576 nodes, 1 × 48, TP6 × PP8 × DP12, 870-923 s/iteration, ~6 tokens/s/node; DeepSpeedFugaku's 5-iteration test runs, not Fugaku-LLM's training (a 13B); two runs' logs remain (909-946 s) | comparisons.md, thirty-b.md | baseline |
 | Tensor parallel 4 in the node × FSDP2 (`torch_fugaku.parallel`), sequence parallel, vocab-parallel loss: matches an unsharded copy to 1.6e-7 | thirty-b.md | opt-in (`examples/tp_train.py`) |
 | Full 30B at 4 × 12: 6.0 / 5.7 / 7.6 / **6.6** tokens/s/node at 64 / 128 / 256 / 576 nodes (legacy SIF: ~6.0 at 576); compute 194.5 s/step everywhere, communication 28-46% | thirty-b.md "Full 48-layer runs" | measured |
 | On a 576-node torus, a2a reduce-scatter + direct `MPI_Allgather` (the microbenchmark winners) were 470 s vs 312 s for rings in training | thirty-b.md | `auto` keeps rings |
@@ -96,8 +96,16 @@ shape. Only same-allocation comparisons count: spread between allocations reache
 | benchkit omnilearned (RIKEN-RCCS/benchkit `programs/omnilearned`), the October run directories rerun unchanged, normal mode, `BK_OMNILEARNED_SIF` the only difference, same allocation (jobs 53616203, 53616204) | events/s at 1 / 4 nodes: ed93ef4 17.0 / 55.3, **d7fb755 17.8 / 58.0** (README: 15.9 / 58.4); best losses 9.40150 / 9.56419 vs 9.40150 / 9.56420 | reproduces; current image ~5% faster |
 | SIF reproducibility: `singularity pull` of the same OCI digest (`sha-ed93ef4`, `sha256:26d5947a…`) twice | same size (2,983,251,968 B), different SHA-256 (`ba657626…` in October, `47b102f0…` on 2026-11-05) | the OCI digest identifies an image; a SIF hash identifies one file |
 
+| CI image published as a SIF (`sif` workflow, tag `sif-<short commit>`): d7fb755's file `267d5a25…`. omnilearned 1 / 4 nodes 16.6 / 60.4 events/s with the October best losses; fsdp-llm 64-node 30B with bit-identical losses (jobs 53655487, 53655495, 53655496) | `singularity pull oras://` of it on the x86 login node fails (arm64 file, deleted after the check); fetching the registry blob by its SHA-256 with `curl` works without credentials | how benchkit gets the image |
+
 Note: after `import deepspeed`, the import hooks have fired and removed themselves; check
 `torch_fugaku.deepspeed._state`, not `sys.meta_path`.
+
+## Other machines (benchkit `fsdp-llm`)
+
+The same FSDP2 trainer on RIKYU, DGX Spark, Genoa and Fugaku: per-node results, tensor parallel
+of size 1 costing 3x, small models on FSDP2 alone, fraction of peak (~25% everywhere), and
+Slurm CPU allocation for one agent per node: [cross-machine.md](cross-machine.md).
 
 ## Where things are
 

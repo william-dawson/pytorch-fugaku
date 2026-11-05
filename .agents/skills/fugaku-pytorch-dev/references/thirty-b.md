@@ -1,13 +1,18 @@
 # 30B on the container at 4 × 12: tensor parallel × FSDP2 (November 2026)
 
-**Target:** the legacy SIF's only real-scale run, `30b_pp8_tp6_dp12_*.sh` (Megatron-DeepSpeed on
-Fujitsu's PyTorch 1.13, December 2023):
+**Target:** the legacy SIF's only real-scale run, `30b_pp8_tp6_dp12_*.sh` from DeepSpeedFugaku's
+job scripts (Megatron-DeepSpeed on Fujitsu's PyTorch 1.13, December 2023). These are 5-iteration
+test runs, most of them tuning variants (`outs/readme.txt`); Fugaku-LLM's released model is 13B,
+not this 30B:
 - GPT-30B: 48 layers, hidden 6912, 72 heads, seq 2048, global batch 1536.
 - 576 nodes as an 8×12×6 torus, **1 rank × 48 threads per node**.
 - Tensor parallel 6 (across 6 nodes over Tofu) × pipeline 8 × data parallel 12; 128 micro-batches
   per pipeline per step.
 - Measured (jobs 29716987-29757867): 870-923 s per iteration, 1.38-1.46 TFLOPs per node
-  (Megatron's count), about 6 tokens/s per node.
+  (Megatron's count), about 6 tokens/s per node. Of these, logs remain for two runs, at
+  `/vol0200/data/ra000009/agent-work/fugaku-llm/x/DeepSpeedFugaku/jobs/30b_pp8_tp6_dp12_pytorch1.13/outs/`:
+  29537631 ("fjpytorch base", 928-946 s) and 29733334 ("_softmax striping=6", 909-923 s),
+  5.8 and 6.0 tokens/s per node.
 
 The new SIF's container runs it at 4 × 12 with PyTorch-native 2-D parallelism
 (`assets/h2h/tp_train.py`):

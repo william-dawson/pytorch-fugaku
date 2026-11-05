@@ -44,6 +44,12 @@ pytorch-fugaku/fugaku/pf-setup 4          # ranks per node
 mpiexec -n 64 pytorch-fugaku/fugaku/pf-run pytorch-fugaku.sif python train.py
 ```
 
+For a pinned file whose SHA-256 can be checked, use the SIF CI publishes per commit rather than
+converting the image yourself (each conversion gives a different file): fetch it as a registry
+blob, `https://ghcr.io/v2/william-dawson/pytorch-fugaku/blobs/sha256:<file sha256>` with an
+anonymous token, as benchkit's `build.sh` does (the README has the commands). `singularity pull
+oras://` of it fails on the x86 login node.
+
 [references/recipes.md](references/recipes.md) has full scripts for each route: DeepSpeed
 config, the tensor-parallel launch, binding code and Python packages in with `PF_BIND` and
 `PYTHONPATH`, node shapes.
