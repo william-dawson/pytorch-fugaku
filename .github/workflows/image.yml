@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**.md", ".agents/**", "source-build/**", ".github/workflows/source-build.yml"]
+    paths-ignore: ["**.md", ".agents/**", "source-build/**", ".github/workflows/source-build.yml", ".github/workflows/sif.yml"]
   workflow_dispatch:
 
 permissions:

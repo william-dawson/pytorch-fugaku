@@ -1,0 +1,65 @@
+name: sif
+
+# Converts a pushed image (tag sha-<commit>) to a SIF on GitHub's arm64 runner and publishes the
+# file itself to ghcr.io/<owner>/pytorch-fugaku as an ORAS artifact, tag sif-<short commit>.
+# Converting an image gives a different file, and SHA-256, every time, so sites pull this one
+# file (`singularity pull oras://...`, or plain HTTPS) and check its SHA-256 instead of
+# converting their own. Runs after each successful image build, or by hand for a given commit.
+on:
+  workflow_run:
+    workflows: [image]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full commit SHA whose image (tag sha-<sha>) to convert"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sif:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      SHA: ${{ inputs.sha || github.event.workflow_run.head_sha }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Install Apptainer
+        run: |
+          sudo add-apt-repository -y ppa:apptainer/ppa
+          sudo apt-get update -q
+          sudo apt-get install -y -q apptainer
+          apptainer --version
+      - name: Convert
+        run: |
+          short=${SHA:0:7}
+          echo "SIF=pytorch-fugaku-${short}.sif" >> "$GITHUB_ENV"
+          echo "TAG=sif-${short}" >> "$GITHUB_ENV"
+          apptainer pull --disable-cache "pytorch-fugaku-${short}.sif" "docker://ghcr.io/${OWNER}/pytorch-fugaku:sha-${SHA}"
+      - name: Smoke test
+        run: |
+          apptainer exec "$SIF" python -c "import torch, torch_fugaku, deepspeed, transformers; print(torch.__version__, torch_fugaku.status())"
+      - name: Publish
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | apptainer registry login -u "${{ github.actor }}" --password-stdin oras://ghcr.io
+          apptainer push "$SIF" "oras://ghcr.io/${OWNER}/pytorch-fugaku:${TAG}"
+          T=$(curl -sS -u "${{ github.actor }}:${TOKEN}" "https://ghcr.io/token?scope=repository:${OWNER}/pytorch-fugaku:pull" | jq -r .token)
+          manifest=$(curl -sSI -H "Authorization: Bearer $T" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            "https://ghcr.io/v2/${OWNER}/pytorch-fugaku/manifests/${TAG}" | awk 'tolower($1)=="docker-content-digest:" {print $2}' | tr -d '\r')
+          sha=$(sha256sum "$SIF" | cut -d' ' -f1)
+          {
+            echo "### ${SIF}"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| sha256 | \`${sha}\` |"
+            echo "| size | $(stat -c %s "$SIF") bytes |"
+            echo "| pull | \`singularity pull ${SIF} oras://ghcr.io/${OWNER}/pytorch-fugaku@${manifest}\` |"
+            echo "| tag | \`oras://ghcr.io/${OWNER}/pytorch-fugaku:${TAG}\` |"
+            echo "| image | \`docker://ghcr.io/${OWNER}/pytorch-fugaku:sha-${SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

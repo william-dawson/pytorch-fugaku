@@ -20,6 +20,15 @@ singularity pull --arch arm64 pytorch-fugaku.sif docker://ghcr.io/william-dawson
 git clone https://github.com/william-dawson/pytorch-fugaku.git
 ```
 
+For a pinned, checkable file, pull the SIF that CI publishes for each image instead
+(`sif-<short commit>`, with its SHA-256 in that run's summary of the `sif` workflow). Converting
+the image yourself gives a working file but a different SHA-256 every time.
+
+```sh
+singularity pull --disable-cache pytorch-fugaku.sif oras://ghcr.io/william-dawson/pytorch-fugaku:sif-<short commit>
+sha256sum pytorch-fugaku.sif
+```
+
 A job, one rank per CMG (4 per node, 12 threads each):
 
 ```sh
